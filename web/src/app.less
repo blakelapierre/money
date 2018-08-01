@@ -1,0 +1,70 @@
+body {
+  position: fixed;
+
+  display: flex;
+
+  height: 100%;
+  width: 100%;
+
+  margin: 0;
+  padding: 0;
+}
+
+gui {
+  flex: 1 1 auto;
+
+  display: flex;
+
+  flex-direction: column;
+}
+
+prices {
+  flex: 1 1 auto;
+
+  display: flex;
+
+  justify-content: space-around;
+}
+
+price-history {
+  overflow-y: auto;
+}
+
+books {
+  flex: 1 1 auto;
+
+  display: flex;
+
+  justify-content: space-around;
+
+  l2-book {
+    display: flex;
+    flex-direction: column;
+
+    overflow-y: auto;
+
+    sells {
+      flex: 1 1 auto;
+
+      display: flex;
+      flex-direction: column;
+
+      background-color: rgba(255, 0, 0, 0.5);
+
+      overflow-y: auto;
+
+      sell {
+        display: block;
+      }
+    }
+
+    buys {
+      display: flex;
+      flex-direction: column;
+
+      background-color: rgba(0, 255, 0, 0.5);
+
+      overflow-y: auto;
+    }
+  }
+}
