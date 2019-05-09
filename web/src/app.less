@@ -16,10 +16,38 @@ gui {
   display: flex;
 
   flex-direction: column;
+
+  banner {
+    flex: 1 1 auto;
+
+    display: flex;
+
+    font-size: small;
+
+    overflow-y: auto;
+
+    accounts {
+      flex: 1 0 auto;
+
+      display: table;
+
+      headers { display: table-row; }
+
+      account {
+        display: table-row;
+
+        currency, balance, available, hold {
+          display: table-cell;
+
+          padding: 0 0.25em;
+        }
+      }
+    }
+  }
 }
 
 prices {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 
   display: flex;
 
@@ -30,6 +58,16 @@ price-history {
   overflow-y: auto;
 }
 
+flex {
+  flex: 1 1 auto;
+
+  display: flex;
+}
+
+prices {
+  flex: 1 1 auto;
+}
+
 books {
   flex: 1 1 auto;
 
@@ -37,14 +75,42 @@ books {
 
   justify-content: space-around;
 
-  l2-book {
+  min-height: 75%;
+  max-height: 75%;
+
+  book {
+    flex: 1 1 auto;
+
     display: flex;
+
     flex-direction: column;
 
     overflow-y: auto;
+  }
+
+  l2-book {
+    flex: 0 1 auto;
+
+    position: relative;
+
+    line-height: 1.25em;
+
+    l {
+      display: flex;
+
+      justify-content: space-between;
+
+      qu {
+        margin-left: 2em;
+      }
+
+      &:hover {
+        background-color: rgba(127, 127, 127, 0.5);
+      }
+    }
 
     sells {
-      flex: 1 1 auto;
+      height: 50%;
 
       display: flex;
       flex-direction: column;
@@ -53,18 +119,62 @@ books {
 
       overflow-y: auto;
 
+      transform: rotateX(180deg);
+
       sell {
         display: block;
+
+        transform: rotateX(180deg);
       }
     }
 
+    spread {
+      display: block;
+
+      text-align: center;
+    }
+
     buys {
+      height: 50%;
+
       display: flex;
       flex-direction: column;
 
       background-color: rgba(0, 255, 0, 0.5);
 
       overflow-y: auto;
+      overflow-x: hidden;
+    }
+  }
+
+  my-orders {
+    flex: 1 1 auto;
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    font-family: monospace;
+
+    orders {
+      display: flex;
+      flex-direction: column;
+    }
+    order {
+      button {
+        border: none;
+        background-color: transparent;
+
+        cursor: pointer;
+      }
+    }
+  }
+
+  user-log {
+    user-log-item {
+      display: block;
     }
   }
 }

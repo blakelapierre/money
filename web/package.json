@@ -4,6 +4,7 @@
   "repository": "https://github.com/blakelapierre/base-preact-cycle",
   "version": "0.0.1",
   "dependencies": {
+    "bignumber.js": "^7.2.1",
     "preact-cycle": "^0.5.1"
   },
   "devDependencies": {

@@ -14,10 +14,45 @@ const {ws_port, http_port, web_gui_dir} = process.env;
 const wsServer = new ws.Server({port: ws_port || 8281}),
       sockets = [];
 
+let lastAccounts, lastOrders;
+
 wsServer.on('connection', socket => {
   console.log('ws connection');
 
   sockets.push(socket);
+
+  if (lastOrders && socket.readyState === ws.OPEN) socket.send(JSON.stringify(lastOrders));
+  if (lastAccounts && socket.readyState === ws.OPEN) socket.send(JSON.stringify(lastAccounts));
+
+  socket.on('message', data => {
+    console.log('message', data);
+    const parsed = JSON.parse(data);
+
+    switch (parsed.type) {
+      case 'remove':
+        authedClient
+          .cancelOrder(parsed.id)
+          .then(() => {})
+          .catch(error => console.error('error canceling order', parsed.id, error));
+        break;
+      case 'order':
+        const {id, product_id, order: {side, price, size}} = parsed;
+
+        console.log('order', {id, product_id, side, price, size});
+
+        authedClient
+          .placeOrder({
+            post_only: true,
+            side,
+            price,
+            size,
+            product_id
+          })
+          .then((...args) => socket.send(JSON.stringify({type: 'newOrder', id, args})))
+          .catch(error => console.error('error creating order', parsed.id, parsed.order, error));
+        break;
+    }
+  });
 
   socket.on('disconnect', () => {
     const index = sockets.indexOf(socket);
@@ -61,11 +96,33 @@ const {key, secret, passphrase} = process.env,
       websocketURI = 'wss://ws-feed.pro.coinbase.com';
 
 console.log({web_gui_dir});
-// const authedClient = new Gdax.AuthenticatedClient(key, secret, passphrase, apiURI);
+const authedClient = new Gdax.AuthenticatedClient(key, secret, passphrase, apiURI);
 
-const orderbookSync = new (Gdax as any).OrderbookSync(['BTC-USD'], apiURI, websocketURI, {key, secret, passphrase});
+// const orderbookSync = new (Gdax as any).OrderbookSync(['BTC-USD'], apiURI, websocketURI, {key, secret, passphrase});
 
 const productTickers = createTickers(['BTC-USD', 'BCH-USD', 'BCH-BTC']);
+
+createCoinbaseWsClient();
+
+syncAccounts();
+syncOrders();
+
+setInterval(syncAccounts, 60 * 1000);
+setInterval(syncOrders, 60 * 1000);
+
+function syncOrders() {
+  authedClient
+    .getOrders()
+    .then(orders => (lastOrders = {type: 'orders', orders}, broadcast(JSON.stringify(lastOrders))))
+    .catch(error => console.error('Error getting orders', error));
+}
+
+function syncAccounts() {
+  authedClient
+    .getAccounts()
+    .then(accounts => (lastAccounts = {type: 'accounts', time: new Date().getTime(), accounts}, broadcast(JSON.stringify(lastAccounts))))
+    .catch(error => console.error('Error getting accounts', error));
+}
 
 function createTickers(products) {
   return products.reduce(
@@ -74,60 +131,74 @@ function createTickers(products) {
     {});
 }
 
-const wsClient = new Gdax.WebsocketClient(
-  Object.keys(productTickers),
-  websocketURI,
-  {key, secret, passphrase},
-  {channels: ['ticker', 'level2']}
-);
+function createCoinbaseWsClient() {
+  const wsClient = new Gdax.WebsocketClient(
+    Object.keys(productTickers),
+    websocketURI,
+    {key, secret, passphrase},
+    {channels: ['ticker', 'level2', 'user']}
+  );
 
-wsClient.on('message', data => {
-  switch (data.type as any) {
-    case 'heartbeat': return;
-    case 'snapshot':
-      broadcast(JSON.stringify(data));
+  wsClient.on('message', data => {
+    switch (data.type as any) {
+      case 'heartbeat': return;
+      case 'snapshot':
+        broadcast(JSON.stringify(data));
 
-      return;
-    case 'l2update':
-      broadcast(JSON.stringify(data));
+        return;
+      case 'l2update':
+        broadcast(JSON.stringify(data));
 
-      return;
-    case 'ticker':
-      console.log('ws message', {data});
-      broadcast(JSON.stringify(data));
-      const {product_id, side, price, best_bid, best_ask} = data as any;
+        return;
+      case 'ticker':
+        console.log('ws message', {data});
+        broadcast(JSON.stringify(data));
+        const {product_id, side, price, best_bid, best_ask} = data as any;
 
-      const stats = {price, best_bid, best_ask};
+        const stats = {price, best_bid, best_ask};
 
-      Object.assign(productTickers[product_id].info, stats);
+        Object.assign(productTickers[product_id].info, stats);
 
-      if (side !== undefined) {
-        const info = productTickers[product_id].side[side];
+        if (side !== undefined) {
+          const info = productTickers[product_id].side[side];
 
-        Object.assign(info, stats);
+          Object.assign(info, stats);
 
-        console.log(JSON.stringify(productTickers, undefined, 2));
-      }
+          console.log(JSON.stringify(productTickers, undefined, 2));
+        }
 
-      if (product_id === 'BTC-USD' || product_id === 'BCH-USD') {
-        const ip = impliedPrice('BCH-USD', 'BTC-USD'),
-              ipab = impliedAskBid('BCH-USD', 'BTC-USD');
+        if (product_id === 'BTC-USD' || product_id === 'BCH-USD') {
+          const ip = impliedPrice('BCH-USD', 'BTC-USD'),
+                ipab = impliedAskBid('BCH-USD', 'BTC-USD');
 
-        console.log(ip, 'BCH-BTC implied price', productTickers['BCH-BTC'].info.price - ip, productTickers['BCH-BTC'].info.price);
-        console.log(ipab, 'BCH-BTC implied ask_bid', productTickers['BCH-BTC'].info.best_ask - ipab, productTickers['BCH-BTC'].info.best_ask);
+          console.log(ip, 'BCH-BTC implied price', productTickers['BCH-BTC'].info.price - ip, productTickers['BCH-BTC'].info.price);
+          console.log(ipab, 'BCH-BTC implied ask_bid', productTickers['BCH-BTC'].info.best_ask - ipab, productTickers['BCH-BTC'].info.best_ask);
 
 
 
-        // console.log(impliedPrice('BCH-USD', 'BTC-USD'), 'BCH-BTC implied price');
-        // console.log(impliedAskBid('BCH-USD', 'BTC-USD'), 'BCH-BTC implied ask_bid');
-      }
-      break;
-  }
-});
+          // console.log(impliedPrice('BCH-USD', 'BTC-USD'), 'BCH-BTC implied price');
+          // console.log(impliedAskBid('BCH-USD', 'BTC-USD'), 'BCH-BTC implied ask_bid');
+        }
+        break;
+      case 'received':
+      case 'open':
+      case 'done':
+      case 'match':
+      case 'activate':
+        broadcast(JSON.stringify(data));
+        break;
+    }
+  });
 
-wsClient.on('disconnect', () => {
-  setInterval(() => console.log('ws disconnect'), 1000);
-});
+  wsClient.on('disconnect', () => {
+    console.error('Disconnected from Coinbase WS!!! Reconnecting soon...');
+    setTimeout(() => {
+      console.log('Reconnecting...');
+      createCoinbaseWsClient();
+    }, 1000);
+  });
+}
+
 
 function impliedPrice(coin1, coin2) {
   return productTickers[coin1].info.price / productTickers[coin2].info.price
@@ -137,7 +208,7 @@ function impliedAskBid(coin1, coin2) {
   return productTickers[coin1].info.best_ask / productTickers[coin2].info.best_bid;
 }
 
-orderbookSync.on('error', error => console.log('orderbookSync error', {error}));
+// orderbookSync.on('error', error => console.log('orderbookSync error', {error}));
 
 // console.log('state', orderbookSync.books['BTC-USD'].state());
 
