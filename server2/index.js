@@ -8,8 +8,8 @@ var {coinbene_api_key, coinbene_secret} = process.env;
 var {idcm_api_key, idcm_secret} = process.env;
 
 var tickers = {
-  'fcoin': ['BTC/USDT', 'BCH/BTC', 'FT/ETH'],
-  'gdax': ['BTC/USDC', 'BTC/USD', 'BCH/BTC']
+  'fcoin': ['BTC/USDT'/*, 'BCH/BTC', 'FT/ETH'*/]//,
+  // 'gdax': ['BTC/USDC', 'BTC/USD', 'BCH/BTC']
 };
 
 
@@ -20,6 +20,86 @@ var routes = [
   ['fcoin:USDT', 'fcoin:XLM', 'gdax:XLM', 'gdax:ETH', 'gdax:USDC'],
 ];
 
+// async function makeMarket(pair, )
+
+function wait (ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
+  var ticker = await exchange.fetchTicker(market);
+
+  console.log(ticker.bid, ticker.ask);
+
+  var r = [];
+  var newOrders = [];
+
+  for (var i = 0; i < pricePoints; i++) {
+    var price = {
+      buy: ticker.bid - (priceStep * i),
+      sell: ticker.ask + (priceStep * i)
+    }
+
+    var buyResponse = exchange.createLimitBuyOrder(market, amount, price.buy);
+    var sellResponse = exchange.createLimitSellOrder(market, amount, price.sell);
+
+    console.log(price);
+
+    r.push(buyResponse);
+    r.push(sellResponse);
+
+    await wait(120);
+  }
+
+  await wait(1000);
+
+  var f = await exchange.fetchClosedOrders(market);
+
+  // console.log(f);
+
+  var orders = _.groupBy(f, 'side');
+  var fees = {
+    'lastXOrders': 0,
+    'BTC': 0,
+    'BCH': 0
+  };
+  // console.log(f[0]);
+
+  for (var side in orders) {
+    var o = orders[side];
+
+    // console.log('o', o[0]);
+
+    var fTotalIncome = _.reduce(o, (agg, oo) => agg + parseFloat(oo.info.fees_income), 0);
+    var fTotalFees = _.reduce(o, (agg, oo) => agg - parseFloat(oo.info.fill_fees), 0);
+
+    fees[side === 'sell' ? 'BCH' : 'BTC'] += fTotalIncome;
+    fees[side === 'sell' ? 'BTC' : 'BCH'] += fTotalFees;
+
+    fees['lastXOrders'] += o.length;
+    // console.log('o', side === 'sell' ? 'BCH' : 'BTC', fTotalIncome);
+    // console.log('o', side === 'sell' ? 'BTC' : 'BCH', fTotalFees);
+  }
+
+  console.log({fees});
+
+  _.forEach(r, p => p.then(value => newOrders.push(value)).catch(e => console.error(e)));
+
+  var w = await Promise.all(r)
+                       .catch(e => console.error('manageMarket error', e));
+
+  console.log(_.map(w, a => a.info.status));
+}
+
+async function cancelAllOrders(exchange, orders) {
+  for (var index in orders) {
+    console.log(index, orders[index]);
+    try {
+      await exchange.cancelOrder(orders[index].id);
+    }
+    catch (e) {}
+  }
+}
 
 (async function () {
   // console.log(ccxt.exchanges);
@@ -32,47 +112,80 @@ var routes = [
 
   var apis = {fcoin, gdax/*, coinbene, idcm*/};
 
-  for (var exchange in tickers) {
-    var pairs = tickers[exchange];
+  var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
 
-    for (var index in pairs) {
-      var pair = pairs[index];
+  await cancelAllOrders(fcoin, openOrders);
 
-      var r = await apis[exchange].fetchTicker(pair);
 
-      console.log(exchange, pair, r.bid, r.ask);
-    }
+  while (true) {
+    await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.02);
+
+    await wait(20 * 1000);
   }
 
-  var balances = {
-     fcoin: await fcoin.fetchBalance()
-    ,gdax: await gdax.fetchBalance()
-    ,coss: await coss.fetchBalance()
-    //,coinbene: await coinbene.fetchBalance()
-    //,idcm: await idcm.fetchBalance()
-  };
+  // var btcusdt = await fcoin.fetchTicker('BTC/USDT');
 
-  //var fcoinBalance = await fcoin.fetchBalance();
+  // console.log(btcusdt.bid, btcusdt.ask);
 
-  console.log('fcoin balance FT', balances['fcoin']['FT']);
-  console.log('fcoin balance ETH', balances['fcoin']['ETH']);
+  // var r = [];
+  // var amount = 0.01;
+  // var waitTime = 30;
+  // for (var i = 0; i < 5; i++) {
+  //   var price = btcusdt.bid - (0.10 * i);
+  //   var b = fcoin.createLimitBuyOrder('BTC/USDT', amount, price);
+  //   console.log('buy', price, b);
+  //   price = btcusdt.ask + (0.10 * i);
+  //   var s = fcoin.createLimitSellOrder('BTC/USDT', amount, price);
+  //   await wait(waitTime);
+  //   console.log('sell', price, s);
 
-  console.log(balances);
+  //   r.push(b);
+  //   r.push(s);
+  // }
+
+  // console.log(r);
+
+  // for (var exchange in tickers) {
+  //   var pairs = tickers[exchange];
+
+  //   for (var index in pairs) {
+  //     var pair = pairs[index];
+
+  //     var r = await apis[exchange].fetchTicker(pair);
+
+  //     console.log(exchange, pair, r.bid, r.ask);
+  //   }
+  // }
+
+  // var balances = {
+  //    fcoin: await fcoin.fetchBalance()
+  //   ,gdax: await gdax.fetchBalance()
+  //   ,coss: await coss.fetchBalance()
+  //   //,coinbene: await coinbene.fetchBalance()
+  //   //,idcm: await idcm.fetchBalance()
+  // };
+
+  // //var fcoinBalance = await fcoin.fetchBalance();
+
+  // console.log('fcoin balance FT', balances['fcoin']['FT']);
+  // console.log('fcoin balance ETH', balances['fcoin']['ETH']);
+
+  // console.log(balances);
 
 
-  var b = {};
+  // var b = {};
 
-  for (var exchange in balances) {
-    var total = balances[exchange].total;
+  // for (var exchange in balances) {
+  //   var total = balances[exchange].total;
 
-    for (var coin in total) {
-      var value = total[coin];
+  //   for (var coin in total) {
+  //     var value = total[coin];
 
-      b[coin] = (b[coin] || 0) + value;
-    }
-  }
+  //     b[coin] = (b[coin] || 0) + value;
+  //   }
+  // }
 
-  console.log(_.pickBy(b, value => value > 0));
+  // console.log(_.pickBy(b, value => value > 0));
 
 
   // console.log('fcoin balance BCH', fcoinBalance['BCH']);
