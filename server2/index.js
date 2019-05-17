@@ -31,6 +31,8 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
 
   console.log(ticker.bid, ticker.ask);
 
+  var symbols = market.split('/');
+
   var r = [];
   var newOrders = [];
 
@@ -53,7 +55,7 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
 
   await wait(1000);
 
-  var f = await exchange.fetchClosedOrders(market);
+  var f = await exchange.fetchClosedOrders(market, undefined, undefined, {states: ['filled', 'partial_filled', 'partial_canceled']});
 
   var duration = (f[f.length - 1].timestamp - f[0].timestamp) / 1000 / 60;
 
@@ -61,8 +63,8 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
   var fees = {
     duration,
     'lastXOrders': 0,
-    'BTC': 0,
-    'BCH': 0
+    [symbols[0]]: 0,
+    [symbols[1]]: 0
   };
 
   for (var side in orders) {
@@ -71,15 +73,15 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
     var fTotalIncome = _.reduce(o, (agg, oo) => agg + parseFloat(oo.info.fees_income), 0);
     var fTotalFees = _.reduce(o, (agg, oo) => agg - parseFloat(oo.info.fill_fees), 0);
 
-    fees[side === 'sell' ? 'BCH' : 'BTC'] += fTotalIncome;
-    fees[side === 'sell' ? 'BTC' : 'BCH'] += fTotalFees;
+    fees[side === 'sell' ? symbols[0] : symbols[1]] += fTotalIncome;
+    fees[side === 'sell' ? symbols[1] : symbols[0]] += fTotalFees;
 
     fees['lastXOrders'] += o.length;
   }
 
   fees['estimatedDailyRate'] = {
-    'BTC': (24 * 60) / duration * fees['BTC'],
-    'BCH': (24 * 60) / duration * fees['BCH']
+    [symbols[1]]: (24 * 60) / duration * fees[symbols[1]],
+    [symbols[0]]: (24 * 60) / duration * fees[symbols[0]]
   };
 
   console.log({fees});
@@ -100,14 +102,39 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
 }
 
 async function cancelAllOrders(exchange, orders) {
-  for (var index in orders) {
-    var o = orders[index];
-    console.log('cancelling', parseInt(index) + 1, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
+  for (let i = 0; i < orders.length; i += 3) {
+    var o = orders[i];
+    var r = [];
+    console.log('cancelling', i + 1, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
     try {
-      await exchange.cancelOrder(orders[index].id);
+      r.push(exchange.cancelOrder(orders[i].id));
     }
     catch (e) {}
+
+    if ((i + 1) < orders.length)
+    console.log('cancelling', i + 2, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
+    try {
+      r.push(exchange.cancelOrder(orders[i + 1].id));
+    }
+    catch (e) {}
+
+    if ((i + 2) < orders.length)
+    console.log('cancelling', i + 3, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
+    try {
+      r.push(exchange.cancelOrder(orders[i + 2].id));
+    }
+    catch (e) {}
+
+    await Promise.all(r).catch(e => console.error('error cancelling order', e));
   }
+  // for (var index in orders) {
+  //   var o = orders[index];
+  //   console.log('cancelling', parseInt(index) + 1, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
+  //   try {
+  //     await exchange.cancelOrder(orders[index].id);
+  //   }
+  //   catch (e) {}
+  // }
 }
 
 (async function () {
@@ -126,16 +153,43 @@ async function cancelAllOrders(exchange, orders) {
   // await cancelAllOrders(fcoin, openOrders);
 
 
+  // while (true) {
+  //   var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
+
+  //   await cancelAllOrders(fcoin, openOrders);
+
+  //   await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+
+  //   await wait(20 * 1000);
+
+  //   await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+
+  //   await wait(20 * 1000);
+  // }
+
   while (true) {
     var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
 
     await cancelAllOrders(fcoin, openOrders);
 
-    await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.075);
+    await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+
+    await wait(10 * 1000);
+
+    openOrders = await fcoin.fetchOpenOrders('BTC/USDT');
+
+    await cancelAllOrders(fcoin, openOrders);
+
+    await manageMarket('BTC/USDT', fcoin, 3, 0.1, 0.01);
 
     await wait(20 * 1000);
 
-    await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.075);
+
+    await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+
+    await wait(10 * 1000);
+
+    await manageMarket('BTC/USDT', fcoin, 3, 0.1, 0.01);
 
     await wait(20 * 1000);
   }
