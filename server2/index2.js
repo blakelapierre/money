@@ -114,7 +114,7 @@ function recordFilledOrders (orders) {
   // console.log('record', orders[0]);
 }
 
-async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
+async function manageMarketPercent (market, exchange, pricePoints, priceStep, amount) {
   console.log('*** MANAGING', market);
 
   var ticker = await exchange.fetchTicker(market);
@@ -131,7 +131,32 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
   for (var i = 0; i < pricePoints; i++) {
     var price = {
       buy: ticker.bid - (priceStep * i),
-      sell: ticker.ask + (priceStep * 2) + (priceStep * i)
+      sell: ticker.ask + (priceStep * 1) + (priceStep * i)
+    }
+
+    var buyResponse = exchange.createLimitBuyOrder(market, amount, price.buy).catch(error => console.log('buy error', error.message));
+    var sellResponse = exchange.createLimitSellOrder(market, amount, price.sell).catch(error => console.log('sell error', error.message));
+
+    if (prevBuyResponse) await prevBuyResponse;
+    if (prevSellReponse) await prevSellReponse;
+
+    prevBuyResponse = buyResponse;
+    prevSellReponse = sellResponse;
+
+    console.log(price);
+
+    r.push(buyResponse);
+    r.push(sellResponse);
+
+    // // await wait(200);
+    // await buyResponse;
+    // await sellResponse;
+  }
+
+  for (var i = 1; i < pricePoints / 2; i++) {
+    var price = {
+      buy: ticker.bid - (0.02 * i * ticker.bid),
+      sell: ticker.ask + (priceStep * 2) + (0.02 * i * ticker.ask)
     }
 
     var buyResponse = exchange.createLimitBuyOrder(market, amount, price.buy).catch(error => console.log('buy error', error.message));
@@ -213,7 +238,7 @@ async function manageMarket (market, exchange, pricePoints, priceStep, amount) {
   //                      .catch(e => {
   //                         if (e.status === 1016) console.error(e.msg);
   //                         else console.error(e.msg);
-  //                         // console.error('manageMarket error', e);
+  //                         // console.error('manageMarketPercent error', e);
   //                       });
 
   // console.log(_.map(w, a => a.info.status));
@@ -272,86 +297,119 @@ async function cancelAllOrders(exchange, orders) {
 
   //   await cancelAllOrders(fcoin, openOrders);
 
-  //   await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+  //   await manageMarketPercent('BCH/BTC', fcoin, 3, 0.00001, 0.2);
 
   //   await wait(20 * 1000);
 
-  //   await manageMarket('BCH/BTC', fcoin, 3, 0.00001, 0.2);
+  //   await manageMarketPercent('BCH/BTC', fcoin, 3, 0.00001, 0.2);
 
   //   await wait(20 * 1000);
   // }
 
   while (true) {
-    var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('BCH/BTC', fcoin, 4, 0.00001, 0.1);
+    try {
+      var openOrders = await fcoin.fetchOpenOrders('USDC/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('USDC/USDT', fcoin, 2, 0.01, 50);
 
-    await wait (200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('BCH/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('BCH/USDT', fcoin, 4, 0.02, 0.1);
+      openOrders = await fcoin.fetchOpenOrders('TUSD/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('TUSD/USDT', fcoin, 2, 0.01, 50);
 
-    await wait (200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('BTC/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('BTC/USDT', fcoin, 5, 0.02, 0.005);
+      openOrders = await fcoin.fetchOpenOrders('PAX/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('PAX/USDT', fcoin, 2, 0.01, 50);
 
-    await wait (200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('ETH/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('ETH/USDT', fcoin, 5, 0.02, 0.15);
+      openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('BCH/BTC', fcoin, 4, 0.01, 0.1);
 
-    await wait (200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('EOS/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('EOS/USDT', fcoin, 5, 0.02, 6);
+      openOrders = await fcoin.fetchOpenOrders('BCH/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('BCH/USDT', fcoin, 4, 0.01, 0.1);
 
-    await wait (200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('LTC/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('LTC/USDT', fcoin, 5, 0.02, 0.42);
+      openOrders = await fcoin.fetchOpenOrders('BTC/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.01, 0.0015);
 
-    await wait(200);
+      await wait (200);
 
-    openOrders = await fcoin.fetchOpenOrders('FT/USDT');
-    await cancelAllOrders(fcoin, openOrders);
-    await manageMarket('FT/USDT', fcoin, 3, 0.0001, 100);
+      openOrders = await fcoin.fetchOpenOrders('ETH/USDT');
+      await cancelAllOrders(fcoin, openOrders);
+      await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.075);
 
-    await wait(7 * 1000);
+      await wait (200);
+
+      // openOrders = await fcoin.fetchOpenOrders('EOS/USDT');
+      // await cancelAllOrders(fcoin, openOrders);
+      // await manageMarketPercent('EOS/USDT', fcoin, 5, 0.01, 6);
+
+      // await wait (200);
+
+      // openOrders = await fcoin.fetchOpenOrders('LTC/USDT');
+      // await cancelAllOrders(fcoin, openOrders);
+      // await manageMarketPercent('LTC/USDT', fcoin, 5, 0.01, 0.42);
+
+      // await wait(200);
+
+      // openOrders = await fcoin.fetchOpenOrders('FT/USDT');
+      // await cancelAllOrders(fcoin, openOrders);
+      // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
+
+      await wait(15 * 1000);
 
 
-    await manageMarket('BCH/BTC', fcoin, 4, 0.00001, 0.1);
+      await manageMarketPercent('BCH/BTC', fcoin, 4, 0.01, 0.1);
 
-    await wait (200);
+      await wait (200);
 
-    await manageMarket('BCH/USDT', fcoin, 4, 0.02, 0.1);
+      await manageMarketPercent('BCH/USDT', fcoin, 4, 0.01, 0.1);
 
-    await wait (200);
+      await wait (200);
 
-    await manageMarket('BTC/USDT', fcoin, 5, 0.02, 0.005);
+      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.01, 0.0015);
 
-    await wait (200);
+      await wait (200);
 
-    await manageMarket('ETH/USDT', fcoin, 5, 0.02, 0.15);
+      await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.075);
 
-    await wait (200);
+      await wait (200);
 
-    await manageMarket('EOS/USDT', fcoin, 5, 0.02, 6);
+      await manageMarketPercent('USDC/USDT', fcoin, 2, 0.01, 50);
 
-    await wait (200);
+      await wait (200);
 
-    await manageMarket('LTC/USDT', fcoin, 5, 0.02, 0.42);
+      await manageMarketPercent('TUSD/USDT', fcoin, 2, 0.01, 50);
 
-    await wait(200);
+      await wait (200);
 
-    await manageMarket('FT/USDT', fcoin, 3, 0.0001, 100);
+      await manageMarketPercent('PAX/USDT', fcoin, 2, 0.01, 50);
 
-    await wait(7 * 1000);
+      // await wait (200);
+
+      // await manageMarketPercent('EOS/USDT', fcoin, 5, 0.01, 6);
+
+      // await wait (200);
+
+      // await manageMarketPercent('LTC/USDT', fcoin, 5, 0.01, 0.42);
+
+      // await wait(200);
+
+      // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
+
+      await wait(15 * 1000);
+    }
+    catch (e) {}
   }
 
   // var btcusdt = await fcoin.fetchTicker('BTC/USDT');
