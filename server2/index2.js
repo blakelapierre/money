@@ -24,7 +24,121 @@ var routes = [
   ['fcoin:USDT', 'fcoin:XLM', 'gdax:XLM', 'gdax:ETH', 'gdax:USDC'],
 ];
 
-// async function makeMarket(pair, )
+var config = {
+  'fcoin': {
+    'BTC/USDT': {
+      trade: true,
+      priceStep: 0.0001,
+      tradeAmount: 0.01
+    }
+    ,'BCH/USDT': {
+      trade: true,
+      priceStep: 0.1,
+      tradeAmount: 0.1
+    }
+    ,'BCH/BTC': {
+      trade: true,
+      priceStep: 0.1,
+      tradeAmount: 0.1
+    }
+    ,'BTC/TUSD': {
+      trade: false,
+      priceStep: 0.1,
+      tradeAmount: 0.01
+    }
+    ,'BTC/USDC': {
+      trade: false,
+      priceStep: 0.1,
+      tradeAmount: 0.01
+    }
+    ,'USDC/USDT': {
+      trade: false,
+      priceStep: 0.0001,
+      tradeAmount: 100
+    }
+    ,'TUSD/USDT': {
+      trade: false,
+      priceStep: 0.0001,
+      tradeAmount: 100
+    }
+    ,'PAX/USDT': {
+      trade: false,
+      priceStep: 0.0001,
+      tradeAmount: 100
+    }
+    ,'FT/PAX': {
+      trade: false,
+      priceStep: 0.001,
+      tradeAmount: 400
+    }
+  }
+};
+
+var marketMap = {
+  'bchusdt': 'BCH/USDT',
+  'btcusdt': 'BTC/USDT',
+  'bchbtc': 'BCH/BTC'
+};
+
+var lastPrices = {};
+
+(async function (symbols) {
+  var pairs = _.map(symbols, symbol => symbol.split('/').join('').toLowerCase());
+
+  watchTickers(pairs);
+})(Object.keys(_.pickBy(config['fcoin'], value => value.trade)));
+
+function watchTickers (markets) {
+  var tickers = _.map(markets, m => `ticker.${m}`);
+
+  var fcoinWs = new ws('wss://api.fcoin.com/v2/ws');
+
+  fcoinWs.on('open', () => {
+    console.log('fcoin ws open');
+
+    setInterval(() => {
+      if (fcoinWs.readyState === 4) {
+        console.log('ping');
+        fcoinWs.send(JSON.stringify({'cmd': 'ping'}));
+      }
+    }, 30 * 1000);
+
+    fcoinWs.send(
+      JSON.stringify({
+        'cmd': 'sub',
+        'args': tickers
+      })
+    );
+
+    manage();
+  });
+
+  fcoinWs.on('message', message => {
+    var data = JSON.parse(message);
+
+    if (data.type.indexOf('ticker.') === 0) {
+      var parts = data.type.split('.');
+      var ticker = parts[1];
+      var market = marketMap[ticker];
+
+      var ask = data.ticker[4];
+      var bid = data.ticker[2];
+
+      lastPrices[market] = lastPrices[market] || {ask: 0, bid: 0};
+      // orders[market] = orders[market] || {};
+
+      var lastAsk = lastPrices[market].ask;
+      var lastBid = lastPrices[market].bid;
+
+      if (lastAsk === ask && lastBid === bid) return;
+
+      lastPrices[market].ask = ask;
+      lastPrices[market].bid = bid;
+
+      console.log(market, lastPrices[market]);
+    }
+  });
+}
 
 
 var  fcoin = new ccxt.fcoin({apiKey: fcoin_api_key, secret: fcoin_secret})
@@ -117,9 +231,8 @@ function recordFilledOrders (orders) {
 async function manageMarketPercent (market, exchange, pricePoints, priceStep, amount) {
   console.log('*** MANAGING', market);
 
-  var ticker = await exchange.fetchTicker(market);
-
-  console.log(ticker.bid, ticker.ask);
+  // var ticker = await exchange.fetchTicker(market);
+  var ticker;
 
   var symbols = market.split('/');
 
@@ -129,6 +242,9 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
   var prevBuyResponse, prevSellReponse;
 
   for (var i = 0; i < pricePoints; i++) {
+    ticker = lastPrices[market];
+    console.log(ticker.bid, ticker.ask);
+
     var buy= ticker.bid - (priceStep * i);
     var sell = ticker.ask + (priceStep * (i));
 
@@ -148,6 +264,9 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
   }
 
   for (var i = 1; i < pricePoints / 2; i++) {
+    ticker = lastPrices[market];
+    console.log(ticker.bid, ticker.ask);
+
     var buy = ticker.bid - (0.01 * i * ticker.bid);
     var sell = ticker.ask + (priceStep * 2) + (0.01 * i * ticker.ask);
 
@@ -272,7 +391,7 @@ async function cancelAllOrders(exchange, orders) {
   // }
 }
 
-(async function () {
+async function manage () {
   // console.log(ccxt.exchanges);
 
   // var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
@@ -531,7 +650,7 @@ async function cancelAllOrders(exchange, orders) {
 
   // console.log('find', fcoinUSDTMarkets);
   // console.log('find', gdaxUSDCMarkets);
-})();
+}
 
 function findMarketsInExchange (exchange, coin, markets) {
   var f = pair => pair.quote === coin || pair.base === coin;
