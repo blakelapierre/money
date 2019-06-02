@@ -88,6 +88,8 @@ var lastPrices = {};
   watchTickers(pairs);
 })(Object.keys(_.pickBy(config['fcoin'], value => value.trade)));
 
+var stop;
+
 function watchTickers (markets) {
   var tickers = _.map(markets, m => `ticker.${m}`);
 
@@ -97,11 +99,15 @@ function watchTickers (markets) {
     console.log('fcoin ws open');
 
     setInterval(() => {
-      if (fcoinWs.readyState === 4) {
+      if (fcoinWs.readyState === 1) {
         console.log('ping');
-        fcoinWs.send(JSON.stringify({'cmd': 'ping'}));
+        fcoinWs.send(JSON.stringify({'cmd': 'ping', 'args': [new Date ().getTime()]}));
       }
-    }, 30 * 1000);
+      else {
+        stop = true;
+        console.error('ERROR! WS NOT READY!!');
+      }
+    }, 20 * 1000);
 
     fcoinWs.send(
       JSON.stringify({
@@ -113,10 +119,14 @@ function watchTickers (markets) {
     manage();
   });
 
+  fcoinWs.on('close', () => {
+    console.error('****!!!!ERROR!!!!**** WS CLOSED!');
+  });
+
   fcoinWs.on('message', message => {
     var data = JSON.parse(message);
 
-    if (data.type.indexOf('ticker.') === 0) {
+    if (data.type && data.type.indexOf('ticker.') === 0) {
       var parts = data.type.split('.');
       var ticker = parts[1];
       var market = marketMap[ticker];
@@ -137,6 +147,7 @@ function watchTickers (markets) {
 
       console.log(market, lastPrices[market]);
     }
+    else console.error('!!! UNKNOWN response', data);
   });
 }
 
@@ -228,6 +239,17 @@ function recordFilledOrders (orders) {
   // console.log('record', orders[0]);
 }
 
+function handleFCoinOrderError (error) {
+  var json = error.message.substr('fcoin '.length);
+
+  var data = JSON.parse(json);
+
+  if (data.status === 1016) console.error('!!FCOIN Account Balance Insufficient!!');
+  else if (data.status === 1002) console.error('!!FCOIN System Busy!!')
+
+  // console.error('fcoin error+!!!', data);
+}
+
 async function manageMarketPercent (market, exchange, pricePoints, priceStep, amount) {
   console.log('*** MANAGING', market);
 
@@ -248,8 +270,10 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
     var buy= ticker.bid - (priceStep * i);
     var sell = ticker.ask + (priceStep * (i));
 
-    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
-    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
+    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(handleFCoinOrderError);
+    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(handleFCoinOrderError);
+    // var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
+    // var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
 
     if (prevBuyResponse) await prevBuyResponse;
     if (prevSellReponse) await prevSellReponse;
@@ -270,8 +294,10 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
     var buy = ticker.bid - (0.01 * i * ticker.bid);
     var sell = ticker.ask + (priceStep * 2) + (0.01 * i * ticker.ask);
 
-    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
-    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
+    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(handleFCoinOrderError);
+    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(handleFCoinOrderError);
+    // var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
+    // var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
 
     if (prevBuyResponse) await prevBuyResponse;
     if (prevSellReponse) await prevSellReponse;
@@ -415,7 +441,7 @@ async function manage () {
 
   var openOrders;
 
-  while (true) {
+  while (!stop) {
     try {
       // var openOrders = await fcoin.fetchOpenOrders('USDC/USDT');
       // await cancelAllOrders(fcoin, openOrders);
@@ -449,7 +475,7 @@ async function manage () {
 
       openOrders = await fcoin.fetchOpenOrders('BTC/USDT');
       await cancelAllOrders(fcoin, openOrders);
-      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.02);
+      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
 
       await wait (200);
 
@@ -479,7 +505,7 @@ async function manage () {
       // await cancelAllOrders(fcoin, openOrders);
       // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
 
-      await wait(20 * 1000);
+      await wait(2 * 1000);
 
 
       await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
@@ -490,7 +516,7 @@ async function manage () {
 
       await wait (200);
 
-      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.02);
+      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
 
       // await wait (200);
 
@@ -524,7 +550,7 @@ async function manage () {
 
       // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
 
-      await wait(20 * 1000);
+      await wait(10 * 1000);
     }
     catch (e) {}
   }
