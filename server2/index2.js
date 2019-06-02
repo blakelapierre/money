@@ -135,7 +135,6 @@ function watchTickers (markets) {
       var bid = data.ticker[2];
 
       lastPrices[market] = lastPrices[market] || {ask: 0, bid: 0};
-      // orders[market] = orders[market] || {};
 
       var lastAsk = lastPrices[market].ask;
       var lastBid = lastPrices[market].bid;
@@ -159,30 +158,6 @@ var  fcoin = new ccxt.fcoin({apiKey: fcoin_api_key, secret: fcoin_secret})
     //,idcm = new ccxt.idcm({apiKey: idcm_api_key, secret: idcm_secret});
 
 var apis = {fcoin, gdax/*, coinbene, idcm*/};
-
-// var fcoinWs = new ws('wss://api.fcoin.com/v2/ws');
-
-// fcoinWs.on('open', () => {
-//   console.log('fcoin ws open');
-
-//   fcoinWs.send(JSON.stringify({'cmd': 'sub', args: ['ticker.btcusdt']}))
-// });
-
-// fcoinWs.on('message', message => {
-//   // console.log('fcoin message', message.toString());
-
-//   var data = JSON.parse(message);
-
-//   switch (data.type) {
-//     case 'ticker.btcusdt':
-//       var ask = data.ticker[4];
-//       var bid = data.ticker[2];
-
-//       console.log('btc/usdt', ask, bid);
-
-//       makeOrders ('BTC/USDT', fcoin, 4, 0.01, 0.0025, ask, bid);
-//   }
-// });
 
 var lastAsk = 0, lastBid = 0;
 
@@ -236,7 +211,6 @@ function recordFilledOrders (orders) {
       });
     }
   }
-  // console.log('record', orders[0]);
 }
 
 function handleFCoinOrderError (error) {
@@ -272,8 +246,6 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
 
     var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(handleFCoinOrderError);
     var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(handleFCoinOrderError);
-    // var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
-    // var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
 
     if (prevBuyResponse) await prevBuyResponse;
     if (prevSellReponse) await prevSellReponse;
@@ -296,8 +268,6 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
 
     var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(handleFCoinOrderError);
     var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(handleFCoinOrderError);
-    // var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).catch(error => console.log('buy error', error.message));
-    // var sellResponse = exchange.createLimitSellOrder(market, amount, sell).catch(error => console.log('sell error', error.message));
 
     if (prevBuyResponse) await prevBuyResponse;
     if (prevSellReponse) await prevSellReponse;
@@ -315,8 +285,6 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
 
   try {
     var f = await exchange.fetchClosedOrders(market, undefined, undefined, {states: ['filled', 'partial_filled', 'partial_canceled']});
-
-    // recordFilledOrders(f);
 
     var duration = (f[f.length - 1].timestamp - f[0].timestamp) / 1000 / 60;
 
@@ -366,15 +334,6 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
     }));
   }
   catch (e) {}
-
-  // var w = await Promise.all(r)
-  //                      .catch(e => {
-  //                         if (e.status === 1016) console.error(e.msg);
-  //                         else console.error(e.msg);
-  //                         // console.error('manageMarketPercent error', e);
-  //                       });
-
-  // console.log(_.map(w, a => a.info.status));
 }
 
 async function cancelAllOrders(exchange, orders) {
@@ -407,60 +366,14 @@ async function cancelAllOrders(exchange, orders) {
 
     await Promise.all(r).catch(e => console.error('error cancelling order', e));
   }
-  // for (var index in orders) {
-  //   var o = orders[index];
-  //   console.log('cancelling', parseInt(index) + 1, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
-  //   try {
-  //     await exchange.cancelOrder(orders[index].id);
-  //   }
-  //   catch (e) {}
-  // }
 }
 
 async function manage () {
-  // console.log(ccxt.exchanges);
-
-  // var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
-
-  // await cancelAllOrders(fcoin, openOrders);
-
-
-  // while (true) {
-  //   var openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
-
-  //   await cancelAllOrders(fcoin, openOrders);
-
-  //   await manageMarketPercent('BCH/BTC', fcoin, 3, 0.00001, 0.2);
-
-  //   await wait(20 * 1000);
-
-  //   await manageMarketPercent('BCH/BTC', fcoin, 3, 0.00001, 0.2);
-
-  //   await wait(20 * 1000);
-  // }
 
   var openOrders;
 
   while (!stop) {
     try {
-      // var openOrders = await fcoin.fetchOpenOrders('USDC/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('USDC/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
-      // openOrders = await fcoin.fetchOpenOrders('TUSD/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('TUSD/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
-      // openOrders = await fcoin.fetchOpenOrders('PAX/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('PAX/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
       openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
       await cancelAllOrders(fcoin, openOrders);
       await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
@@ -477,36 +390,7 @@ async function manage () {
       await cancelAllOrders(fcoin, openOrders);
       await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
 
-      await wait (200);
-
-      // openOrders = await fcoin.fetchOpenOrders('ETH/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.1);
-
-      // await wait (200);
-
-      // openOrders = await fcoin.fetchOpenOrders('FT/PAX');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('FT/PAX', fcoin, 4, 0.0001, 400);
-
-      // openOrders = await fcoin.fetchOpenOrders('EOS/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('EOS/USDT', fcoin, 5, 0.01, 6);
-
-      // await wait (200);
-
-      // openOrders = await fcoin.fetchOpenOrders('LTC/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('LTC/USDT', fcoin, 5, 0.01, 0.42);
-
-      // await wait(200);
-
-      // openOrders = await fcoin.fetchOpenOrders('FT/USDT');
-      // await cancelAllOrders(fcoin, openOrders);
-      // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
-
       await wait(2 * 1000);
-
 
       await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
 
@@ -518,164 +402,10 @@ async function manage () {
 
       await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
 
-      // await wait (200);
-
-      // await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.1);
-
-      // await wait (200);
-
-      // await manageMarketPercent('USDC/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
-      // await manageMarketPercent('TUSD/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
-      // await manageMarketPercent('PAX/USDT', fcoin, 4, 0.01, 100);
-
-      // await wait (200);
-
-      // await manageMarketPercent('FT/PAX', fcoin, 4, 0.0001, 400);
-
-      // await wait (200);
-
-      // await manageMarketPercent('EOS/USDT', fcoin, 5, 0.01, 6);
-
-      // await wait (200);
-
-      // await manageMarketPercent('LTC/USDT', fcoin, 5, 0.01, 0.42);
-
-      // await wait(200);
-
-      // await manageMarketPercent('FT/USDT', fcoin, 3, 0.01, 20);
-
       await wait(10 * 1000);
     }
     catch (e) {}
   }
-
-  // var btcusdt = await fcoin.fetchTicker('BTC/USDT');
-
-  // console.log(btcusdt.bid, btcusdt.ask);
-
-  // var r = [];
-  // var amount = 0.01;
-  // var waitTime = 30;
-  // for (var i = 0; i < 5; i++) {
-  //   var price = btcusdt.bid - (0.10 * i);
-  //   var b = fcoin.createLimitBuyOrder('BTC/USDT', amount, price);
-  //   console.log('buy', price, b);
-  //   price = btcusdt.ask + (0.10 * i);
-  //   var s = fcoin.createLimitSellOrder('BTC/USDT', amount, price);
-  //   await wait(waitTime);
-  //   console.log('sell', price, s);
-
-  //   r.push(b);
-  //   r.push(s);
-  // }
-
-  // console.log(r);
-
-  // for (var exchange in tickers) {
-  //   var pairs = tickers[exchange];
-
-  //   for (var index in pairs) {
-  //     var pair = pairs[index];
-
-  //     var r = await apis[exchange].fetchTicker(pair);
-
-  //     console.log(exchange, pair, r.bid, r.ask);
-  //   }
-  // }
-
-  // var balances = {
-  //    fcoin: await fcoin.fetchBalance()
-  //   ,gdax: await gdax.fetchBalance()
-  //   ,coss: await coss.fetchBalance()
-  //   //,coinbene: await coinbene.fetchBalance()
-  //   //,idcm: await idcm.fetchBalance()
-  // };
-
-  // //var fcoinBalance = await fcoin.fetchBalance();
-
-  // console.log('fcoin balance FT', balances['fcoin']['FT']);
-  // console.log('fcoin balance ETH', balances['fcoin']['ETH']);
-
-  // console.log(balances);
-
-
-  // var b = {};
-
-  // for (var exchange in balances) {
-  //   var total = balances[exchange].total;
-
-  //   for (var coin in total) {
-  //     var value = total[coin];
-
-  //     b[coin] = (b[coin] || 0) + value;
-  //   }
-  // }
-
-  // console.log(_.pickBy(b, value => value > 0));
-
-
-  // console.log('fcoin balance BCH', fcoinBalance['BCH']);
-
-
-
-  //var fcoinOrders = await fcoin.fetchOrders('FT/BTC');
-  //console.log('fcoin orders FT/BTC', _.map(fcoinOrders, order => [order.side, order.status, order.price, order.amount, order.filled, order.info.fees_income]));
-
-  // _.forEach(tickers, (pairs, exchange) => {
-  //   _.forEach(pairs, pair => {
-  //     var r = await apis[exchange].fetchTicker(pair);
-
-  //     console.log(exchange, pair, r);
-  //   });
-  // });
-
-
-  // var markets = {
-  //   fcoin: await fcoin.loadMarkets(),
-  //   gdax: await gdax.loadMarkets()
-  // };
-
-  // console.log('markets', markets);
-  // console.log('exchanges', Object.keys(markets));
-
-  // var cross = crossMarkets(markets);
-  // // console.log('cross markets', cross);
-
-  // var usdT2C = [];
-
-  // for (let i = 0; i < cross.length; i++) {
-  //   var c = cross[i];
-
-  //   if (
-  //     // c[2] === 'USDT' || c[2] === 'USDC' || c[4] === 'USDT' || c[4] === 'USDC'
-  //     // c[2] === 'USDT'
-  //     // (c[2] === 'USDT' && c[4] === 'USDC')
-  //     (c[2] === 'USDT') &&
-  //     (c[4] === 'USDC')
-  //   ) {
-  //     // console.log('c', c);
-  //     usdT2C.push(c);
-  //   }
-  // }
-
-  // // console.log('usdT2C', usdT2C);
-
-  // _.forEach(usdT2C, c => console.log('usdT2C', c));
-
-  // // console.log('find', findMarkets('USDT', markets));
-  // var fcoinUSDTMarkets = findMarketsInExchange('fcoin', 'USDT', markets);
-  // var gdaxUSDCMarkets = findMarketsInExchange('gdax', 'USDC', markets);
-
-  // _.forEach(fcoinUSDTMarkets, m => console.log('m', m));
-
-  // console.log('find', fcoinUSDTMarkets);
-  // console.log('find', gdaxUSDCMarkets);
 }
 
 function findMarketsInExchange (exchange, coin, markets) {
