@@ -29,17 +29,17 @@ var config = {
     'BTC/USDT': {
       trade: true,
       priceStep: 0.0001,
-      tradeAmount: 0.01
+      tradeAmount: 0.02
     }
     ,'BCH/USDT': {
       trade: true,
       priceStep: 0.1,
-      tradeAmount: 0.1
+      tradeAmount: 0.25
     }
     ,'BCH/BTC': {
       trade: true,
       priceStep: 0.1,
-      tradeAmount: 0.1
+      tradeAmount: 0.25
     }
     ,'BTC/TUSD': {
       trade: false,
@@ -71,22 +71,42 @@ var config = {
       priceStep: 0.001,
       tradeAmount: 400
     }
+    ,'ETH/USDT': {
+      trade: true,
+      priceStep: 0.1,
+      tradeAmount: 0.5
+    }
+    ,'EOS/USDT': {
+      trade: true,
+      priceStep: 0.001,
+      tradeAmount: 15
+    }
+    ,'LTC/USDT': {
+      trade: true,
+      priceStep: 0.01,
+      tradeAmount: 1
+    }
   }
 };
 
 var marketMap = {
   'bchusdt': 'BCH/USDT',
   'btcusdt': 'BTC/USDT',
-  'bchbtc': 'BCH/BTC'
+  'bchbtc': 'BCH/BTC',
+  'ethusdt': 'ETH/USDT',
+  'eosusdt': 'EOS/USDT',
+  'ltcusdt': 'LTC/USDT'
 };
 
 var lastPrices = {};
+
+const getTradeable = exchangeName => _.pickBy(config[exchangeName], value => value.trade);
 
 (async function (symbols) {
   var pairs = _.map(symbols, symbol => symbol.split('/').join('').toLowerCase());
 
   watchTickers(pairs);
-})(Object.keys(_.pickBy(config['fcoin'], value => value.trade)));
+})(Object.keys(getTradeable('fcoin')));
 
 var stop;
 
@@ -144,10 +164,62 @@ function watchTickers (markets) {
       lastPrices[market].ask = ask;
       lastPrices[market].bid = bid;
 
+      try {
+        console.log('trying to update', market);
+        //updateOrders(market, {ask, bid, lastAsk, lastBid}).catch(e => console.error('Error updating orders', market, e));
+      }
+      catch (e) {
+        console.error('error updating orders', market, e);
+      }
+
       console.log(market, lastPrices[market]);
     }
     else console.error('!!! UNKNOWN response', data);
   });
+}
+
+async function updateOrders (market, {ask, bid, lastAsk, lastBid}) {
+  var noMargin = market === 'BCH/BTC';
+  var priceStep = config['fcoin'][market].priceStep;
+  var amount = config['fcoin'][market].tradeAmount;
+
+  var currentOrdersByPrice = outstandingOrdersByPrice['fcoin'][market];
+
+  if (lastAsk !== 0 && ask - lastAsk < 0) {
+    // fill in new sells
+    console.log('Updating', market, 'sells', {ask, lastAsk});
+    var sellResponse, marginSellResponse, prevSellResponse, prevMarginSellResponse;
+    for (let price = ask; price < lastAsk; price += priceStep) {
+      if (!(currentOrdersByPrice && currentOrdersByPrice.sell[price])) sellResponse = fcoin.createLimitSellOrder(market, amount, price).then(recordSellOrder(market, amount, price)).catch(handleFCoinOrderSellError);
+      if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginSell[price])) marginSellResponse = fcoin.createLimitSellOrder(market, amount * 2, price, {'account_type': 'margin'}).then(recordSellOrder(market, amount, price, true)).catch(handleFCoinOrderSellError);
+      
+      if (prevSellResponse) await prevSellResponse;
+      if (prevMarginSellResponse) await prevMarginSellResponse;
+
+      await wait (200);
+
+      prevSellResponse = sellResponse;
+      prevMarginSellResponse = marginSellResponse;
+    }
+  }
+
+  if (lastBid !== 0 && bid - lastBid > 0) {
+    // fill in new buys
+    console.log('Updating', market, 'bids', {bid, lastBid});
+    var buyResponse, marginBuyResponse, prevBuyResponse, prevMarginBuyResponse;
+    for (let price = bid; price > lastBid; price -= priceStep) {
+      if (!(currentOrdersByPrice && currentOrdersByPrice.buy[price])) buyResponse = fcoin.createLimitBuyOrder(market, amount, price).then(recordSellOrder(market, amount, price)).catch(handleFCoinOrderBuyError);
+      if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginBuy[price])) marginBuyResponse = fcoin.createLimitBuyOrder(market, amount * 2, price, {'account_type': 'margin'}).then(recordBuyOrder(market, amount, price, true)).catch(handleFCoinOrderBuyError);
+
+      if (prevBuyResponse) await prevBuyResponse;
+      if (prevMarginBuyResponse) await prevMarginBuyResponse;
+
+      await wait (200);
+
+      prevBuyResponse = buyResponse;
+      prevMarginBuyResponse = marginBuyResponse;
+    }
+  }
 }
 
 
@@ -206,31 +278,52 @@ function recordFilledOrders (orders) {
     if (!existing) {
       symbolOrders[order.id] = true;
 
-      fs.appendFile(symbol, `${JSON.stringify(order)}\n`, error => {
+     /* fs.appendFile(symbol, `${JSON.stringify(order)}\n`, error => {
         if (error) console.error('error writing order to', symbol, error);
-      });
+      });*/
     }
   }
 }
 
-function handleFCoinOrderError (error) {
+function handleFCoinOrderBuyError (error) {
   var json = error.message.substr('fcoin '.length);
 
-  var data = JSON.parse(json);
+  try {
+    var data = JSON.parse(json);
 
-  if (data.status === 1016) console.error('!!FCOIN Account Balance Insufficient!!');
-  else if (data.status === 1002) console.error('!!FCOIN System Busy!!')
-
-  // console.error('fcoin error+!!!', data);
+    if (data.status === 1016) console.error('!!FCOIN Account Balance Insufficient to Buy!!');
+    else if (data.status === 1002) console.error('!!FCOIN System Busy!!');
+    else if (data.status === 429) {
+      console.error('api limit!!');
+//      await wait (1000);
+    }
+    else console.error('fcoin error+!!!', data);
+  }
+  catch (e) { console.error('error parsing json', json, error, e); }
 }
 
-async function checkClosedOrders (exchange, market) {
-  var symbols = market.split('/');
-
-  console.log(Object.keys(outstandingOrders).length, 'outstanding orders');
+function handleFCoinOrderSellError (error) {
+  var json = error.message.substr('fcoin '.length);
 
   try {
-    var f = await exchange.fetchClosedOrders(market, undefined, undefined, {states: ['filled', 'partial_filled', 'partial_canceled']});
+    var data = JSON.parse(json);
+
+    if (data.status === 1016) console.error('!!FCOIN Account Balance Insufficient to Sell!!');
+    else if (data.status === 1002) console.error('!!FCOIN System Buys!!');
+    else if (data.staus === 429) {
+      console.error('api limit!!');
+//      await wait (1000);
+    }
+    else console.error('fcoin error+!!!', data);
+  }
+  catch (e) { console.error('error parsing json', json, error, e); }
+}
+
+async function checkClosedOrders (exchange, market, margin) {
+  var symbols = market.split('/');
+
+  try {
+    var f = await exchange.fetchOrders(market, undefined, undefined, {states: 'filled,partial_filled,partial_canceled', 'account_type': margin ? 'margin' : undefined});
 
     var duration = (f[f.length - 1].timestamp - f[0].timestamp) / 1000 / 60;
 
@@ -270,11 +363,14 @@ async function checkClosedOrders (exchange, market) {
     var tradeGain = transactionAmounts['sell'] - transactionAmounts['buy'];
     var estimatedDailyTradeGain = tradeGain * ((24 * 60) / duration);
 
-    console.log({fees, transactionAmounts, tradeGain, estimatedDailyTradeGain});
+    
+    console.log(Object.keys(outstandingOrders).length, 'outstanding orders');
 
-    fs.appendFile('log', `${JSON.stringify({time: new Date(), fees, transactionAmounts, tradeGain, estimatedDailyTradeGain})}\n`, error => {
+    return {fees, transactionAmounts, tradeGain, estimatedDailyTradeGain};
+
+    /*fs.appendFile('log', `${JSON.stringify({time: new Date(), fees, transactionAmounts, tradeGain, estimatedDailyTradeGain})}\n`, error => {
       if (error) console.error('log append error', error);
-    });
+    });*/
   }
   catch (e) {
     console.error ('Error checking closed orders', market, e);
@@ -282,18 +378,23 @@ async function checkClosedOrders (exchange, market) {
 }
 
 const outstandingOrders = {};
+const outstandingOrdersByPrice = {'fcoin': {}};
 
-function recordBuyOrder (market, amount, price) {
+function recordBuyOrder (market, amount, price, margin) {
   return data => {
     console.log(market, 'BUY ', amount, '@', price);
     outstandingOrders[data.id] = true;
+    outstandingOrdersByPrice['fcoin'][market] = outstandingOrdersByPrice['fcoin'][market] || {buy: {}, sell: {}, marginBuy: {}, marginSell: {}};
+    outstandingOrdersByPrice['fcoin'][market][margin ? 'marginBuy' : 'buy'][price] = data;
   };
 }
 
-function recordSellOrder (market, amount, price) {
+function recordSellOrder (market, amount, price, margin) {
   return data => {
     console.log(market, 'SELL', amount, '@', price);
     outstandingOrders[data.id] = true;
+    outstandingOrdersByPrice['fcoin'][market] = outstandingOrdersByPrice['fcoin'][market] || {buy: {}, sell: {}, marginBuy: {}, marginSell: {}};
+    outstandingOrdersByPrice['fcoin'][market][margin ? 'marginSell' : 'sell'][price] = data;
   };
 }
 
@@ -301,57 +402,80 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
   console.log('*** MANAGING', market);
 
   // var ticker = await exchange.fetchTicker(market);
-  var ticker;
+  var ticker = lastPrices[market];
+  if (!ticker) return;
 
   var symbols = market.split('/');
 
   var r = [];
   var newOrders = [];
 
-  var prevBuyResponse, prevSellReponse;
+  var noMargin = market === 'BCH/BTC';
+
+  var prevBuyResponse, prevMarginBuyResponse, prevSellReponse, prevMarginSellResponse,
+      buyResponse, marginBuyResponse, sellResponse, marginSellResponse;
+
+  var currentOrdersByPrice = outstandingOrdersByPrice['fcoin'][market];
+
+  var marginMultiplier = market === 'BTC/USDT' ? 7 : (market === 'BCH/USDT' ? 15 : (market === 'ETH/USDT' ? 3 : 1.5));
 
   for (var i = 0; i < pricePoints; i++) {
-    ticker = lastPrices[market];
     console.log(market, {ticker});
 
-    var buy= ticker.bid - (priceStep * i);
+    var buy = ticker.bid - (priceStep * i);
     var sell = ticker.ask + (priceStep * (i));
 
-    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderError);
-    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderError);
+    if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
+    if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginBuy[buy])) marginBuyResponse = exchange.createLimitBuyOrder(market, amount * marginMultiplier, buy, {'account_type': 'margin'}).then(recordBuyOrder(market, amount, buy * marginMultiplier, true)).catch(handleFCoinOrderBuyError);
+    if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
+    if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginSell[sell])) marginSellResponse = exchange.createLimitSellOrder(market, amount * marginMultiplier, sell, {'account_type': 'margin'}).then(recordSellOrder(market, amount, sell * marginMultiplier, true)).catch(handleFCoinOrderSellError);
 
     if (prevBuyResponse) await prevBuyResponse;
+    if (prevMarginBuyResponse) await prevMarginBuyResponse;
     if (prevSellReponse) await prevSellReponse;
+    if (prevMarginSellResponse) await prevMarginSellResponse;
 
     prevBuyResponse = buyResponse;
+    prevMarginBuyResponse = marginBuyResponse;
     prevSellReponse = sellResponse;
+    prevMarginSellResponse = marginSellResponse;
 
     // console.log({buy, sell});
 
-    r.push(buyResponse);
-    r.push(sellResponse);
+    if (buyResponse) r.push(buyResponse);
+    if (marginBuyResponse) r.push(marginBuyResponse);
+    if (sellResponse) r.push(sellResponse);
+    if (marginSellResponse) r.push(marginSellResponse);
   }
 
-  for (var i = 1; i < pricePoints / 2; i++) {
+  for (var i = 1; i < pricePoints; i++) {
     ticker = lastPrices[market];
-    console.log(ticker.bid, ticker.ask);
+    console.log(market, ticker);
 
     var buy = ticker.bid - (0.01 * i * ticker.bid);
-    var sell = ticker.ask + (priceStep * 2) + (0.01 * i * ticker.ask);
+    var sell = ticker.ask + (0.01 * i * ticker.ask);
 
-    var buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderError);
-    var sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderError);
+    if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
+    if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginBuy[buy])) marginBuyResponse = exchange.createLimitBuyOrder(market, amount * marginMultiplier, buy, {'account_type': 'margin'}).then(recordBuyOrder(market, amount * marginMultiplier, buy, true)).catch(handleFCoinOrderBuyError);
+    if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
+    if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginSell[sell])) marginSellResponse = exchange.createLimitSellOrder(market, amount * marginMultiplier, sell, {'account_type': 'margin'}).then(recordSellOrder(market, amount * marginMultiplier, sell, true)).catch(handleFCoinOrderSellError);
 
     if (prevBuyResponse) await prevBuyResponse;
+    if (prevMarginBuyResponse) await prevMarginBuyResponse;
     if (prevSellReponse) await prevSellReponse;
+    if (prevMarginSellResponse) await prevMarginSellResponse;
 
     prevBuyResponse = buyResponse;
+    prevMarginBuyResponse = marginBuyResponse;
     prevSellReponse = sellResponse;
+    prevMarginSellResponse = marginSellResponse;
 
     // console.log({buy, sell});
 
-    r.push(buyResponse);
-    r.push(sellResponse);
+    if (buyResponse) r.push(buyResponse);
+    if (marginBuyResponse) r.push(marginBuyResponse);
+    if (sellResponse)  r.push(sellResponse);
+    if (marginSellResponse) r.push(marginSellResponse);
   }
 
   try {
@@ -370,9 +494,11 @@ function cancelOrder(exchange, id) {
 }
 
 async function cancelAllOrders(exchange, orders) {
+  console.log('cancelling', orders.length); 
   for (let i = 0; i < orders.length; i += 3) {
     var o = orders[i];
     var r = [];
+
     console.log('cancelling', i + 1, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
     try {
       r.push(cancelOrder(exchange, o.id));
@@ -401,49 +527,110 @@ async function cancelAllOrders(exchange, orders) {
   }
 }
 
+async function startManage (exchange, pair, count, priceStep, amount) {
+  const ticker = lastPrices[pair];
+  if (!ticker) return;
+
+  await cancelAllOrders(exchange, _.filter(await exchange.fetchOpenOrders(pair), order => {
+    return true;
+    if (order.side === 'buy' && ticker) {
+      if (Math.abs(order.price - ticker.bid) > (priceStep * count)) return true;
+    }
+    else if (order.side === 'sell' && ticker) {
+      if (Math.abs(order.price - ticker.ask) > (priceStep * count)) return true;
+    }
+    return false;
+  }));
+  await cancelAllOrders(exchange, await exchange.fetchOrders(pair, undefined, undefined, {'account_type': 'margin', 'states': 'submitted,partial_filled'}));
+  await manageMarketPercent(pair, exchange, count, priceStep, amount);
+}
+
+function setIntervalAndRun (fn, interval) { return setInterval(fn, interval), fn();  }
+
 async function manage () {
 
   var openOrders;
 
-  setInterval(async function() {
-    await checkClosedOrders(fcoin, 'BCH/BTC');
-    await checkClosedOrders(fcoin, 'BCH/USDT');
-    await checkClosedOrders(fcoin, 'BTC/USDT');
+  setIntervalAndRun(async function() {
+    const results = [];
+    for (var pair of ['BTC/USDT', 'ETH/USDT', 'EOS/USDT', 'LTC/USDT', 'BCH/USDT', 'BCH/BTC']) {
+      const result = await checkClosedOrders(fcoin, pair);
+      console.log(pair, result);
+      if (pair !== 'BCH/BTC') {
+        const marginResult = await checkClosedOrders(fcoin, pair, true);
+        console.log('margin', pair, marginResult);
+        results.push(marginResult);
+      }
+      results.push(result);
+    }
+	  console.log('results', results);
+    var fees = {amount: {}, estimatedDailyRate: {}, maxDuration: 0};
+    results.forEach(result => {
+      for (var symbol in result.fees.estimatedDailyRate) {
+        fees.amount[symbol] = (fees.amount[symbol] || 0) + result.fees[symbol];
+	fees.estimatedDailyRate[symbol] = (fees.estimatedDailyRate[symbol] || 0) + result.fees.estimatedDailyRate[symbol];
+      }
+      if (result.fees.duration > fees.maxDuration) fees.maxDuration = result.fees.duration;
+      if (outstandingOrders[result.id]) {
+        console.log('bought/sold', result);
+        delete outstandingOrders[result.id];
+      }
+    });
+
+    console.log(fees);
   }, 20 * 1000);
+
+  const pauseTime = 200;
+
+  await wait (1000);
 
   while (!stop) {
     try {
-      openOrders = await fcoin.fetchOpenOrders('BCH/BTC');
-      await cancelAllOrders(fcoin, openOrders);
-      await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
-
-      await wait (200);
-
-      openOrders = await fcoin.fetchOpenOrders('BCH/USDT');
-      await cancelAllOrders(fcoin, openOrders);
-      await manageMarketPercent('BCH/USDT', fcoin, 4, 0.1, 0.2);
-
-      await wait (200);
-
-      openOrders = await fcoin.fetchOpenOrders('BTC/USDT');
-      await cancelAllOrders(fcoin, openOrders);
-      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
-
-      await wait(2 * 1000);
-
-      await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
-
-      await wait (200);
-
-      await manageMarketPercent('BCH/USDT', fcoin, 4, 0.1, 0.2);
-
-      await wait (200);
-
-      await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.01);
-
-      await wait(10 * 1000);
+      await start ();
+      await wait (pauseTime);
+      await end ();
     }
-    catch (e) {}
+    catch (e) {
+      console.log('error manage main loop', e);
+    }
+  }
+
+  async function start () {
+    await startManage(fcoin, 'BTC/USDT', 5, 0.1, 0.02);
+    await wait (pauseTime);
+
+    await startManage(fcoin, 'ETH/USDT', 5, 0.01, 0.5);
+    await wait (pauseTime);
+
+    await startManage(fcoin, 'EOS/USDT', 4, 0.001, 15);
+    await wait (pauseTime);
+
+    await startManage(fcoin, 'LTC/USDT', 4, 0.01, 1);
+    await wait (pauseTime);
+
+    await startManage(fcoin, 'BCH/USDT', 5, 0.1, 0.25);
+    await wait (pauseTime);
+
+    await startManage(fcoin, 'BCH/BTC', 4, 0.00001, 0.2);
+  }
+
+  async function end () {
+    await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.02);
+    await wait (pauseTime);
+
+    await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.5);
+    await wait (pauseTime);
+
+    await manageMarketPercent('EOS/USDT', fcoin, 4, 0.001, 15);
+    await wait (pauseTime);
+
+    await manageMarketPercent('LTC/USDT', fcoin, 4, 0.01, 1);
+    await wait (pauseTime);
+
+    await manageMarketPercent('BCH/USDT', fcoin, 5, 0.1, 0.25);
+    await wait (pauseTime);
+
+    await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
   }
 }
 
