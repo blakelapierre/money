@@ -5,7 +5,7 @@ var ws = require('ws');
 var ccxt = require('ccxt');
 var _ = require('lodash');
 
-var p = require('generator-trees').promises;
+var {g, p} = require('generator-trees');
 
 var {fcoin_api_key, fcoin_secret} = process.env;
 var {coinbase_api_key, coinbase_secret, coinbase_passphrase} = process.env;
@@ -104,6 +104,143 @@ var lastPrices = {};
 
 const getTradeable = exchangeName => _.pickBy(config[exchangeName], value => value.trade);
 
+const tradePoints = [0, 0.015, 0.025, 0.035, 0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.17, 0.19, 0.21];
+
+function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) {
+  const updateQueue = [];
+  const abortTrades = {};
+
+  let gotUpdatePromise, resolve;
+
+  priceUpdateNotifier(market => {
+    if (!_.find(updateQueue, market)) updateQueue.push(market);
+    if (gotUpdatePromise) {
+	    console.log('resolving gotUpdatePromise', updateQueue);
+      gotUpdatePromise = undefined;
+      resolve();
+    }
+    abortTrades[market] = true;
+  });
+
+/*  for (var market in markets) {
+    yield* (function * () {
+      let orders = await exchange.fetchOrders(market, undefined, undefined, {'states': 'submitted,partial_filled'});
+      for (let i = 0; i < orders.length; i++) {
+	console.log('canceling', market, i, '/', orders.length, orders[i].id);
+        yield exchange.cancelOrder(orders[i].id);
+      }
+    })();
+//    console.log(market, orders);
+  }*/
+ 
+  while (true) {
+    const updateMarket = updateQueue.pop();
+	  console.log('got updateMarket', updateMarket);
+    if (!updateMarket) {
+      gotUpdatePromise = gotUpdatePromise || new Promise(r => resolve = r);
+      yield gotUpdatePromise;
+      continue;
+    }
+
+    abortTrades[updateMarket] = false;
+
+    var config = markets[updateMarket];
+    var {ask, bid} = lastPrices[updateMarket];
+
+    var buyConfigs = generateBuyConfigs(updateMarket, config.tradeAmount, bid, tradePoints);
+    var sellConfigs = generateSellConfigs(updateMarket, config.tradeAmount, ask, tradePoints);
+console.log('buy/sell!!', market, {ask, bid})
+    for (let i = 0; i < tradePoints.length; i++) {
+      var buyConfig = buyConfigs[i];
+//	    console.log('BUY ', updateMarket, buyConfig.amount, '@', buyConfig.price);
+      yield exchange.createLimitBuyOrder(updateMarket, buyConfig.amount, buyConfig.price).then((config => () => console.log('BOUGHT', updateMarket, config.amount, '@', config.price))(buyConfig)).catch((config => error => console.log('BUY ERROR ', updateMarket, config.amount, '@', config.price, error.message))(buyConfig));
+	
+      if (abortTrades[updateMarket]) break;
+
+      var sellConfig = sellConfigs[i];
+//	    console.log('SELL', updateMarket, sellConfig.amount, '@', sellConfig.price);
+      yield exchange.createLimitSellOrder(updateMarket, sellConfig.amount, sellConfig.price).then((config => () => console.log('SOLD  ', updateMarket, config.amount, '@', config.price))(sellConfig)).catch((config => error => console.log('SELL ERROR', updateMarket, config.amount, '@', config.price, error.message))(sellConfig));
+	    
+      if (abortTrades[updateMarket]) break;
+    }
+    abortTrades[updateMarket] = false; // ? unneeded ?
+  }
+}
+
+function generateBuyConfigs (market, amount, bid, tradePoints) {
+  return tradePoints.map(p => ({market, amount, price: bid - (1 - p)}));
+}
+
+function generateSellConfigs (market, amount, ask, tradePoints) {
+  return tradePoints.map(p => ({market, amount, price: ask + (1 + p)}));
+}
+
+/*
+async function manageExchange (exchange, markets, tradePoints) {
+  return p.async(4, g.loop(g.interleave(m())));
+ 
+  function * m () {
+    for (var name in markets) {
+      var market = markets[name];
+	    console.log('yielding', market);
+      yield manageMarket (exchange, market.symbol, market.tradeAmount, tradePoints, createExchangeMarketInfo (exchange, market));
+    }
+  }
+}
+*/
+
+function createExchangeMarketInfo (exchange, market) {
+  // ??
+  return {pricesValid: true, manage: true};
+}
+
+function * manageMarket (exchange, market, amount, tradePoints, info) {
+  while (info.manage) {
+    console.log ('managing', market);
+    var prices = lastPrices[market];
+    var {ask, bid} = prices;
+    var tradeGenerator = generateTrades (exchange, market, amount, ask, bid, tradePoints);
+
+    while (info.pricesValid) {
+      var {value, done} = tradeGenerator.next();
+      yield value();
+      if (done) break;
+    }
+    info.pricesValid = true;
+  }
+}
+
+function * generateTrades (exchange, market, amount, ask, bid, tradePoints) {
+  return g.interleave((function * () {
+    yield generateBuyTrades (exchange, market, amount, bid, tradePoints);
+    yield generateSellTrades (exchange, market, amount, ask, tradePoints);
+  })());
+}
+
+function * generateBuyTrades (exchange, market, amount, price, tradePoints) {
+  for (var point of tradePoints) yield () => exchange[`createLimitBuyOrder`](market, amount, price * (1 - point));
+}
+
+function * generateSellTrades (exchange, market, amount, price, tradePoints) {
+  for (var point of tradePoints) yield () => exchange[`createLimitSellOrder`](market, amount, price * (1 + point));
+}
+//  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price - (price * 0.015));
+/*  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.015);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.025);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.035);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.05);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.07);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.09);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.11);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.13);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.15);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.17);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.19);
+  yield () => exchange[`createLimit${side === 'buy' ? 'Buy' : 'Sell'}Order`](market, amount, price * (1 - 0.21);
+
+  
+}*/
+
 async function exchangeAPILoop (exchangeRequestGenerator) {
   return p.async(4, exchangeRequestGenerator);
 }
@@ -120,6 +257,11 @@ function watchTickers (markets) {
   var tickers = _.map(markets, m => `ticker.${m}`);
 
   var fcoinWs = new ws('wss://api.fcoin.com/v2/ws');
+
+  let marketUpdateNotifierFn = () => {};
+  const marketUpdateNotifier = fn => marketUpdateNotifierFn = fn; 
+
+  const notifyUpdate = market => marketUpdateNotifierFn(market);
 
   fcoinWs.on('open', () => {
     console.log('fcoin ws open');
@@ -143,8 +285,8 @@ function watchTickers (markets) {
     );
     
 //    exchangeAPILoop(exchangeRequestGenerator);
-
-    manage();
+    p.async(4, manageExchange (fcoin, getTradeable('fcoin'), tradePoints, marketUpdateNotifier), () => {}, error => console.error('Error managing exchange', error)); 
+    //manage();
   });
 
   fcoinWs.on('close', () => {
@@ -172,7 +314,8 @@ function watchTickers (markets) {
       lastPrices[market].ask = ask;
       lastPrices[market].bid = bid;
 
-      updateOrders(market, {ask, bid, lastAsk, lastBid});
+      //updateOrders(market, {ask, bid, lastAsk, lastBid});
+      notifyUpdate(market, {ask, bid, lastAsk, lastBid});
 
       console.log(market, lastPrices[market]);
     }
@@ -381,7 +524,6 @@ async function checkClosedOrders (exchange, market, margin) {
 
     var tradeGain = transactionAmounts['sell'] - transactionAmounts['buy'];
     var estimatedDailyTradeGain = tradeGain * ((24 * 60) / duration);
-
     
     console.log(Object.keys(outstandingOrders).length, 'outstanding orders');
 
@@ -552,7 +694,8 @@ async function startManage (exchange, pair, count, priceStep, amount) {
   const ticker = lastPrices[pair];
   if (!ticker) return;
 
-  await cancelAllOrders(exchange, _.filter(await exchange.fetchOpenOrders(pair), order => {
+  await cancelAllOrders(exchange, _.filter(await exchange.fetchOpenOrders(pair), filterOutstandingOrders));
+/*  await cancelAllOrders(exchange, _.filter(await exchange.fetchOpenOrders(pair), order => {
     return true;
     if (order.side === 'buy' && ticker) {
       if (Math.abs(order.price - ticker.bid) > (priceStep * count)) return true;
@@ -561,12 +704,35 @@ async function startManage (exchange, pair, count, priceStep, amount) {
       if (Math.abs(order.price - ticker.ask) > (priceStep * count)) return true;
     }
     return false;
-  }));
-  await cancelAllOrders(exchange, await exchange.fetchOrders(pair, undefined, undefined, {'account_type': 'margin', 'states': 'submitted,partial_filled'}));
+  }));*/
+  await cancelAllOrders(exchange, _.filter(await exchange.fetchOrders(pair, undefined, undefined, {'account_type': 'margin', 'states': 'submitted,partial_filled'}), filterOutstandingMarginOrders));
   await manageMarketPercent(pair, exchange, count, priceStep, amount);
 }
 
+function filterOutstandingOrders (order) {
+	return true;
+  if (outstandingOrders[order.id]) return false;
+//  console.log(order);
+  return true;
+}
+
+function filterOutstandingMarginOrders (order) {
+	return true;
+  if (outstandingOrders[order.id]) return false;
+  return true;
+}
+
 function setIntervalAndRun (fn, interval) { return setInterval(fn, interval), fn();  }
+
+async function manageUpdateLoop () {
+  while (true) {
+    await processNextUpdate();
+  }
+}
+
+async function processNextUpdate() {
+  
+}
 
 async function manage () {
 
@@ -605,11 +771,19 @@ async function manage () {
 
   await wait (1000);
 
+  var exchangeGenerator = await  manageExchange (fcoin, _.pickBy(config, ({trade}) => trade), tradePoints);
+	return;
+
   while (!stop) {
     try {
+       await p.sync(exchangeGenerator);
+       await wait (pauseTime * 1000);
+	    
+/*
       await start ();
       await wait (pauseTime);
       await end ();
+*/
     }
     catch (e) {
       console.log('error manage main loop', e);
