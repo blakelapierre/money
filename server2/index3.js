@@ -31,15 +31,21 @@ var config = {
     'BTC/USDT': {
       trade: true,
       priceStep: 0.0001,
-      tradeAmount: 0.02
+      tradeAmount: 0.02,
+      margin: {
+        tradeAmount: 0.05
+      }
     }
     ,'BCH/USDT': {
       trade: true,
       priceStep: 0.1,
-      tradeAmount: 0.25
+      tradeAmount: 0.25,
+      margin: {
+        tradeAmount: 1
+      }
     }
     ,'BCH/BTC': {
-      trade: true,
+      trade: false,
       priceStep: 0.1,
       tradeAmount: 0.25
     }
@@ -76,17 +82,26 @@ var config = {
     ,'ETH/USDT': {
       trade: true,
       priceStep: 0.1,
-      tradeAmount: 0.5
+      tradeAmount: 0.5,
+      margin: {
+        tradeAmount: 0.75
+      }
     }
     ,'EOS/USDT': {
       trade: true,
       priceStep: 0.001,
-      tradeAmount: 15
+      tradeAmount: 8,
+      margin: {
+        tradeAmount: 8
+      }
     }
     ,'LTC/USDT': {
       trade: true,
       priceStep: 0.01,
-      tradeAmount: 1
+      tradeAmount: 0.5,
+      margin: {
+        tradeAmount: 0.5
+      }
     }
   }
 };
@@ -111,6 +126,12 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
   const abortTrades = {};
 
   let gotUpdatePromise, resolve;
+  let outstandingOrders = {};
+
+  for (var market in markets) {
+    if (lastPrices[market]) updateQueue.push(market);
+    outstandingOrders[market] = {'buy': {}, 'sell': {}};
+  }
 
   priceUpdateNotifier(market => {
     if (!_.find(updateQueue, market)) updateQueue.push(market);
@@ -120,6 +141,10 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
       resolve();
     }
     abortTrades[market] = true;
+    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['buy']));
+    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['sell']));
+    //bad
+    outstandingOrders[market] = {buy: {}, sell: {}};
   });
 
 /*  for (var market in markets) {
@@ -132,9 +157,12 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
     })();
 //    console.log(market, orders);
   }*/
- 
+
+
+  const ordersToCancel = [];
+
   while (true) {
-    const updateMarket = updateQueue.pop();
+    const updateMarket = updateQueue.shift();
 	  console.log('got updateMarket', updateMarket);
     if (!updateMarket) {
       gotUpdatePromise = gotUpdatePromise || new Promise(r => resolve = r);
@@ -147,20 +175,51 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
     var config = markets[updateMarket];
     var {ask, bid} = lastPrices[updateMarket];
 
-    var buyConfigs = generateBuyConfigs(updateMarket, config.tradeAmount, bid, tradePoints);
-    var sellConfigs = generateSellConfigs(updateMarket, config.tradeAmount, ask, tradePoints);
-console.log('buy/sell!!', market, {ask, bid})
+    var buyConfigs = generateBuyConfigs(updateMarket, config.margin.tradeAmount, bid, tradePoints);
+    var sellConfigs = generateSellConfigs(updateMarket, config.margin.tradeAmount, ask, tradePoints);
+console.log('buy/sell!!', updateMarket, {ask, bid})
     for (let i = 0; i < tradePoints.length; i++) {
+      var orderToCancel = ordersToCancel.shift();
+      if (orderToCancel) {
+	console.log('canceling', orderToCancel.id, ';', ordersToCancel.length, 'left to cancel');
+
+	yield exchange.cancelOrder(orderToCancel.id)
+		      .then((orderToCancel => () => {
+                        console.log(orderToCancel.id, 'cancelled');
+                        if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
+                        if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
+                      })(orderToCancel))
+	              .catch((orderToCancel => error => {
+                        console.log('error cancelling order', orderToCancel.id, error.message);
+                        if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
+                        if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
+		      })(orderToCancel));
+      }
+
+      if (abortTrades[updateMarket]) break;
+
       var buyConfig = buyConfigs[i];
 //	    console.log('BUY ', updateMarket, buyConfig.amount, '@', buyConfig.price);
-      yield exchange.createLimitBuyOrder(updateMarket, buyConfig.amount, buyConfig.price).then((config => () => console.log('BOUGHT', updateMarket, config.amount, '@', config.price))(buyConfig)).catch((config => error => console.log('BUY ERROR ', updateMarket, config.amount, '@', config.price, error.message))(buyConfig));
-	
+      if (!outstandingOrders[updateMarket]['buy'][buyConfig.price]) {
+        yield exchange.createLimitBuyOrder(updateMarket, buyConfig.amount, buyConfig.price, {'account_type': 'margin'})
+		      .then((config => order => {
+			 console.log('BUY ', updateMarket, config.amount, '@', config.price);
+			 outstandingOrders[updateMarket]['buy'][buyConfig.price] = order;
+		      })(buyConfig))
+		      .catch((config => error => console.log('ERROR BUY ', updateMarket, config.amount, '@', config.price, error.message))(buyConfig));
+      }
       if (abortTrades[updateMarket]) break;
 
       var sellConfig = sellConfigs[i];
 //	    console.log('SELL', updateMarket, sellConfig.amount, '@', sellConfig.price);
-      yield exchange.createLimitSellOrder(updateMarket, sellConfig.amount, sellConfig.price).then((config => () => console.log('SOLD  ', updateMarket, config.amount, '@', config.price))(sellConfig)).catch((config => error => console.log('SELL ERROR', updateMarket, config.amount, '@', config.price, error.message))(sellConfig));
-	    
+      if (!outstandingOrders[updateMarket]['sell'][sellConfig.price]) {
+        yield exchange.createLimitSellOrder(updateMarket, sellConfig.amount, sellConfig.price, {'account_type': 'margin'})
+		      .then((config => order => {
+		        console.log('SELL', updateMarket, config.amount, '@', config.price);
+			outstandingOrders[updateMarket]['sell'][sellConfig.price] = order;
+		      })(sellConfig))
+		      .catch((config => error => console.log('ERROR SELL', updateMarket, config.amount, '@', config.price, error.message))(sellConfig));
+      }	    
       if (abortTrades[updateMarket]) break;
     }
     abortTrades[updateMarket] = false; // ? unneeded ?
@@ -168,11 +227,11 @@ console.log('buy/sell!!', market, {ask, bid})
 }
 
 function generateBuyConfigs (market, amount, bid, tradePoints) {
-  return tradePoints.map(p => ({market, amount, price: bid - (1 - p)}));
+  return tradePoints.map(p => ({market, amount, price: bid * (1 - p)}));
 }
 
 function generateSellConfigs (market, amount, ask, tradePoints) {
-  return tradePoints.map(p => ({market, amount, price: ask + (1 + p)}));
+  return tradePoints.map(p => ({market, amount, price: ask * (1 + p)}));
 }
 
 /*
@@ -285,7 +344,16 @@ function watchTickers (markets) {
     );
     
 //    exchangeAPILoop(exchangeRequestGenerator);
-    p.async(4, manageExchange (fcoin, getTradeable('fcoin'), tradePoints, marketUpdateNotifier), () => {}, error => console.error('Error managing exchange', error)); 
+    (async function () {
+      var markets = getTradeable('fcoin');
+
+      for (var market in markets) {
+        await cancelAllOrders(fcoin, await fcoin.fetchOpenOrders(market));
+	await cancelAllOrders(fcoin, await fcoin.fetchOrders(market, undefined, undefined, {'account_type': 'margin', 'states': 'submitted,partial_filled'}));
+      }
+
+      p.async(5, manageExchange (fcoin, markets, tradePoints, marketUpdateNotifier), () => {}, error => console.error('Error managing exchange', error)); 
+    })();
     //manage();
   });
 
@@ -652,6 +720,13 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
   }
 }
 
+function cancelOrders (exchange, orders) {
+  return p.async(4, g.map(g.toGenerator(orders), order => exchange.cancelOrder(id).then(() => {
+    if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
+    if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
+  })));
+}
+
 function cancelOrder(exchange, id) {
   return exchange.cancelOrder(id).then(() => delete outstandingOrders[id]);
 }
@@ -686,7 +761,18 @@ async function cancelAllOrders(exchange, orders) {
       catch (e) {}
     }
 
-    await Promise.all(r).catch(e => console.error('error cancelling order', e));
+    if ((i + 3) < orders.length) {
+      o = orders[i + 3];
+      console.log('cancelling', i + 4, '/', orders.length, o.symbol, o.side, o.price, o.amount, o.id);
+      try {
+        r.push(cancelOrder(exchange, o.id));
+      }
+      catch (e) {}
+    }
+
+    await Promise.all(r).catch(e => {
+      console.error('error cancelling order', e.message);
+    });
   }
 }
 
