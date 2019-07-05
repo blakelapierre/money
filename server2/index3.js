@@ -1,6 +1,7 @@
 var fs = require('fs');
 
 var ws = require('ws');
+var http = require('http');
 
 var ccxt = require('ccxt');
 var _ = require('lodash');
@@ -12,6 +13,27 @@ var {coinbase_api_key, coinbase_secret, coinbase_passphrase} = process.env;
 var {coss_api_key, coss_secret} = process.env;
 var {coinbene_api_key, coinbene_secret} = process.env;
 var {idcm_api_key, idcm_secret} = process.env;
+
+const server = new ws.Server({port: 7331});
+//const httpServer = new http.Server({port: 7332});
+
+const httpServer = http.createServer ((request, response) => {
+  response.write(`<html><head><style>output>* { display: block; }</style><script>var ws = new WebSocket('ws://' + window.location.hostname + ':7331'); ws.addEventListener('message', function(event) { document.getElementsByTagName('output')[0].appendChild(document.createTextNode(event.data)); });</script></head><body><output></output><input onkeypress="if (event.which === 13) { var output = document.getElementsByTagName('output')[0]; output.appendChild(document.createTextNode(event.target.value)); output.appendChild(document.createTextNode(eval(event.target.value))); }"/></body></html>`);
+  response.end();
+});
+
+httpServer.listen(7332);
+
+server.on('connection', connection => {
+  console.log('ws connection');
+
+  if (connection.readyState === ws.OPEN) connection.send(JSON.stringify(getTradeable('fcoin')));
+
+  connection.on('message', message => {
+    console.log('ws message', message);
+    if (connection.readyState === ws.OPEN) connection.send(message);
+  });
+});
 
 var tickers = {
   'fcoin': ['BTC/USDT'/*, 'BCH/BTC', 'FT/ETH'*/]//,
@@ -33,15 +55,15 @@ var config = {
       priceStep: 0.0001,
       tradeAmount: 0.02,
       margin: {
-        tradeAmount: 0.05
+        tradeAmount:1.5
       }
     }
     ,'BCH/USDT': {
       trade: true,
       priceStep: 0.1,
-      tradeAmount: 0.25,
+      tradeAmount: 1,
       margin: {
-        tradeAmount: 1
+        tradeAmount: 40
       }
     }
     ,'BCH/BTC': {
@@ -84,7 +106,7 @@ var config = {
       priceStep: 0.1,
       tradeAmount: 0.5,
       margin: {
-        tradeAmount: 0.75
+        tradeAmount: 25
       }
     }
     ,'EOS/USDT': {
@@ -92,15 +114,15 @@ var config = {
       priceStep: 0.001,
       tradeAmount: 8,
       margin: {
-        tradeAmount: 8
+        tradeAmount: 700
       }
     }
     ,'LTC/USDT': {
       trade: true,
       priceStep: 0.01,
-      tradeAmount: 0.5,
+      tradeAmount: 0.33,
       margin: {
-        tradeAmount: 0.5
+        tradeAmount: 15
       }
     }
   }
@@ -120,6 +142,55 @@ var lastPrices = {};
 const getTradeable = exchangeName => _.pickBy(config[exchangeName], value => value.trade);
 
 const tradePoints = [0, 0.015, 0.025, 0.035, 0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.17, 0.19, 0.21];
+const tradeRatios = [10, 20, 20, 20, 40, 40, 40, 40, 40, 40, 40, 40, 20];
+
+async function calculateFees() {
+  const results = [];
+  for (var pair of ['BTC/USDT', 'ETH/USDT', 'EOS/USDT', 'LTC/USDT', 'BCH/USDT', /*'BCH/BTC'*/]) {
+//      const result = await checkClosedOrders(fcoin, pair);
+//      console.log(pair, result);
+    if (pair !== 'BCH/BTC') {
+      const marginResult = await checkClosedOrders(fcoin, pair, true);
+      console.log('margin', pair, marginResult);
+      results.push(marginResult);
+    }
+//      results.push(result);
+  }
+   
+  console.log('results', results);
+  var fees = {amount: {}, estimatedDailyRate: {}, maxDuration: 0};
+    
+  results.forEach(result => {
+    for (var symbol in result.fees.estimatedDailyRate) {
+      fees.amount[symbol] = (fees.amount[symbol] || 0) + result.fees[symbol];
+      fees.estimatedDailyRate[symbol] = (fees.estimatedDailyRate[symbol] || 0) + result.fees.estimatedDailyRate[symbol];
+    }
+    if (result.fees.duration > fees.maxDuration) fees.maxDuration = result.fees.duration;
+  });
+
+  console.log(fees);
+}
+
+function * mm (exchange, market, tradePoints, outstandingOrders) {
+  return g
+	  .interleave(
+	    manageMarketSide (exchange, market, tradePoints, 'buy', outstandingOrders['buy']),
+	    manageMarketSide (exchange, market, tradePoints, 'sell', outstandingOrders['sell']));
+
+/*
+  const buyGenerator 
+  while (true) {
+
+  }*/
+}
+
+function * manageMarketSide (exchange, market, tradePoints, bestPrice, side, outstandingOrders) {
+  while (true) {
+    for (var i = 0; i < tradePoints.length; i++) {
+      var price = bestPrice tradePoints[i]
+    }
+  }
+}
 
 function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) {
   const updateQueue = [];
@@ -133,7 +204,9 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
     outstandingOrders[market] = {'buy': {}, 'sell': {}};
   }
 
-  priceUpdateNotifier(market => {
+  priceUpdateNotifier(setupUpdate);
+
+  function setupUpdate (market) {
     if (!_.find(updateQueue, market)) updateQueue.push(market);
     if (gotUpdatePromise) {
 	    console.log('resolving gotUpdatePromise', updateQueue);
@@ -141,11 +214,57 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
       resolve();
     }
     abortTrades[market] = true;
-    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['buy']));
-    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['sell']));
+    for (var order of Object.values(outstandingOrders[market]['buy'])) {
+      if (!_.find(ordersToCancel, order)) ordersToCancel.push(order);
+    }
+    for (var order of Object.values(outstandingOrders[market]['sell'])) {
+      if (!_.find(ordersToCancel, order)) ordersToCancel.push(order);
+    }
+//    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['buy']));
+//    ordersToCancel.push.apply(ordersToCancel, Object.values(outstandingOrders[market]['sell']));
     //bad
-    outstandingOrders[market] = {buy: {}, sell: {}};
-  });
+    //outstandingOrders[market] = {buy: {}, sell: {}};
+  }
+
+
+  setIntervalAndRun(calculateFees, 20 * 1000);
+
+  setIntervalAndRun(function () {
+    for (var market in markets) {
+      console.log('setting up', market);
+      setupUpdate (market);
+    }
+    checkMarketClosedOrders (market);
+  }, 5 * 1000);
+ 
+  function checkMarketClosedOrders (market) {
+    return exchange.fetchOrders (market, undefined, undefined, {'states': 'filled,partial_canceled,canceled'})
+                   .then (orders => {
+                     for (let i = 0; i < orders.length; i++) {
+                       var order = orders[i];
+		       var {price} = order;
+
+	               var buyOrderAtPrice = outstandingOrders[market]['buy'][price];
+
+	               if (buyOrderAtPrice && buyOrderAtPrice.id === order.id) {
+	                 delete oustandingOrders[market]['buy'][price];
+	                 console.log('$$$$ bought', market, '@', price, '$$$$');
+	                 setupUpdate(market);
+		       }
+
+                       var sellOrderAtPrice = outstandingOrders[market]['sell'][price];
+
+		       if (sellOrderAtPrice && sellOrderAtPrice.id === order.id) {
+		         delete outstandingOrders[market]['sell'][price];
+	                 console.log('$$$$ sold  ', market, '@', price, '$$$$');
+		         setupUpdate(market);
+                       }
+		     }
+		   })
+	           .catch (error => {
+                     console.error('Error fetching closed orders', market, error);
+		   });
+  }
 
 /*  for (var market in markets) {
     yield* (function * () {
@@ -163,7 +282,8 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
 
   while (true) {
     const updateMarket = updateQueue.shift();
-	  console.log('got updateMarket', updateMarket);
+    
+    console.log('got updateMarket', updateMarket);
     if (!updateMarket) {
       gotUpdatePromise = gotUpdatePromise || new Promise(r => resolve = r);
       yield gotUpdatePromise;
@@ -172,31 +292,35 @@ function * manageExchange (exchange, markets, tradePoints, priceUpdateNotifier) 
 
     abortTrades[updateMarket] = false;
 
-    var config = markets[updateMarket];
-    var {ask, bid} = lastPrices[updateMarket];
 
-    var buyConfigs = generateBuyConfigs(updateMarket, config.margin.tradeAmount, bid, tradePoints);
-    var sellConfigs = generateSellConfigs(updateMarket, config.margin.tradeAmount, ask, tradePoints);
-console.log('buy/sell!!', updateMarket, {ask, bid})
     for (let i = 0; i < tradePoints.length; i++) {
       var orderToCancel = ordersToCancel.shift();
       if (orderToCancel) {
-	console.log('canceling', orderToCancel.id, ';', ordersToCancel.length, 'left to cancel');
-
+//	console.log('canceling', orderToCancel.id, ';', ordersToCancel.length, 'left to cancel');
+        console.log({orderToCancel});
 	yield exchange.cancelOrder(orderToCancel.id)
-		      .then((orderToCancel => () => {
-                        console.log(orderToCancel.id, 'cancelled');
+		      .then(((orderToCancel, updateMarket) => () => {
+                        console.log(orderToCancel.id, 'cancelled', orderToCancel);
                         if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
                         if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
-                      })(orderToCancel))
-	              .catch((orderToCancel => error => {
-                        console.log('error cancelling order', orderToCancel.id, error.message);
+                      })(orderToCancel, updateMarket))
+	              .catch(((orderTocancel, updateMarket) => error => {
+                        console.log('error cancelling order', orderToCancel.id, orderToCancel.message);
                         if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
                         if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
-		      })(orderToCancel));
+		      })(orderToCancel, updateMarket));
       }
 
       if (abortTrades[updateMarket]) break;
+
+
+      var config = markets[updateMarket];
+      var {ask, bid} = lastPrices[updateMarket];
+
+      var buyConfigs = generateBuyConfigs(updateMarket, config.margin.tradeAmount, bid, tradePoints, tradeRatios);
+      var sellConfigs = generateSellConfigs(updateMarket, config.margin.tradeAmount, ask, tradePoints, tradeRatios);
+      
+      console.log('buy/sell!!', updateMarket, {ask, bid})
 
       var buyConfig = buyConfigs[i];
 //	    console.log('BUY ', updateMarket, buyConfig.amount, '@', buyConfig.price);
@@ -204,11 +328,12 @@ console.log('buy/sell!!', updateMarket, {ask, bid})
         yield exchange.createLimitBuyOrder(updateMarket, buyConfig.amount, buyConfig.price, {'account_type': 'margin'})
 		      .then((config => order => {
 			 console.log('BUY ', updateMarket, config.amount, '@', config.price);
-			 outstandingOrders[updateMarket]['buy'][buyConfig.price] = order;
+			 outstandingOrders[updateMarket]['buy'][order.price] = order;
 		      })(buyConfig))
 		      .catch((config => error => console.log('ERROR BUY ', updateMarket, config.amount, '@', config.price, error.message))(buyConfig));
       }
       if (abortTrades[updateMarket]) break;
+
 
       var sellConfig = sellConfigs[i];
 //	    console.log('SELL', updateMarket, sellConfig.amount, '@', sellConfig.price);
@@ -221,32 +346,39 @@ console.log('buy/sell!!', updateMarket, {ask, bid})
 		      .catch((config => error => console.log('ERROR SELL', updateMarket, config.amount, '@', config.price, error.message))(sellConfig));
       }	    
       if (abortTrades[updateMarket]) break;
+
+
+      while (orderToCancel = ordersToCancel.shift()) {
+//	console.log('canceling', orderToCancel.id, ';', ordersToCancel.length, 'left to cancel');
+
+	yield exchange.cancelOrder(orderToCancel.id)
+		      .then(((orderToCancel, updateMarket) => () => {
+                        console.log(orderToCancel.id, 'cancelled', orderToCancel);
+                        if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
+                        if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
+                      })(orderToCancel, updateMarket))
+	              .catch(((orderToCancel, updateMarket) => error => {
+                        console.log('error cancelling order', orderToCancel.id, error.message);
+                        if (outstandingOrders[updateMarket]['buy'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['buy'][orderToCancel.price];
+                        if (outstandingOrders[updateMarket]['sell'][orderToCancel.price] === orderToCancel) delete outstandingOrders[updateMarket]['sell'][orderToCancel.price];
+		      })(orderToCancel, updateMarket));
+      
+        if (abortTrades[updateMarket]) break;
+      }
     }
-    abortTrades[updateMarket] = false; // ? unneeded ?
+    abortTrades[updateMarket] = false; // ? unneeded ?   
+
+    yield checkMarketClosedOrders (updateMarket);
   }
 }
 
-function generateBuyConfigs (market, amount, bid, tradePoints) {
-  return tradePoints.map(p => ({market, amount, price: bid * (1 - p)}));
+function generateBuyConfigs (market, amount, bid, tradePoints, tradeRatios) {
+  return _.zip(tradePoints, tradeRatios).map(([p, r]) => ({market, amount: amount / r, price: bid * (1 - p)}));
 }
 
-function generateSellConfigs (market, amount, ask, tradePoints) {
-  return tradePoints.map(p => ({market, amount, price: ask * (1 + p)}));
+function generateSellConfigs (market, amount, ask, tradePoints, tradeRatios) {
+  return _.zip(tradePoints, tradeRatios).map(([p, r]) => ({market, amount: amount / r, price: ask * (1 + p)}));
 }
-
-/*
-async function manageExchange (exchange, markets, tradePoints) {
-  return p.async(4, g.loop(g.interleave(m())));
- 
-  function * m () {
-    for (var name in markets) {
-      var market = markets[name];
-	    console.log('yielding', market);
-      yield manageMarket (exchange, market.symbol, market.tradeAmount, tradePoints, createExchangeMarketInfo (exchange, market));
-    }
-  }
-}
-*/
 
 function createExchangeMarketInfo (exchange, market) {
   // ??
@@ -733,7 +865,7 @@ function cancelOrder(exchange, id) {
 
 async function cancelAllOrders(exchange, orders) {
   console.log('cancelling', orders.length); 
-  for (let i = 0; i < orders.length; i += 3) {
+  for (let i = 0; i < orders.length; i += 4) {
     var o = orders[i];
     var r = [];
 

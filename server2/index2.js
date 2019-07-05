@@ -398,6 +398,9 @@ function recordSellOrder (market, amount, price, margin) {
   };
 }
 
+var tradePoints = [0, 0.015, 0.025, 0.035, 0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.17, 0.19, 0.21];
+var tradeRatios = [10, 20, 20, 20, 40, 40, 40, 40, 40, 40, 40, 40, 20];
+
 async function manageMarketPercent (market, exchange, pricePoints, priceStep, amount) {
   console.log('*** MANAGING', market);
 
@@ -417,7 +420,7 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
 
   var currentOrdersByPrice = outstandingOrdersByPrice['fcoin'][market];
 
-  var marginMultiplier = market === 'BTC/USDT' ? 7 : (market === 'BCH/USDT' ? 15 : (market === 'ETH/USDT' ? 3 : 1.5));
+  var marginMultiplier = market === 'BTC/USDT' ? 5 : (market === 'BCH/USDT' ? 10 : (market === 'ETH/USDT' ? 3 : 1.5));
 
   for (var i = 0; i < pricePoints; i++) {
     console.log(market, {ticker});
@@ -425,9 +428,9 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
     var buy = ticker.bid - (priceStep * i);
     var sell = ticker.ask + (priceStep * (i));
 
-    if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
+    //if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
     if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginBuy[buy])) marginBuyResponse = exchange.createLimitBuyOrder(market, amount * marginMultiplier, buy, {'account_type': 'margin'}).then(recordBuyOrder(market, amount, buy * marginMultiplier, true)).catch(handleFCoinOrderBuyError);
-    if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
+    //if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
     if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginSell[sell])) marginSellResponse = exchange.createLimitSellOrder(market, amount * marginMultiplier, sell, {'account_type': 'margin'}).then(recordSellOrder(market, amount, sell * marginMultiplier, true)).catch(handleFCoinOrderSellError);
 
     if (prevBuyResponse) await prevBuyResponse;
@@ -448,16 +451,18 @@ async function manageMarketPercent (market, exchange, pricePoints, priceStep, am
     if (marginSellResponse) r.push(marginSellResponse);
   }
 
-  for (var i = 1; i < pricePoints; i++) {
+  for (var i = 1; i < tradePoints.length; i++) {
     ticker = lastPrices[market];
     console.log(market, ticker);
 
-    var buy = ticker.bid - (0.01 * i * ticker.bid);
-    var sell = ticker.ask + (0.01 * i * ticker.ask);
+    var point = tradePoints[i];
 
-    if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
+    var buy = ticker.bid - (point * ticker.bid);
+    var sell = ticker.ask + (point * ticker.ask);
+
+//    if (!(currentOrdersByPrice && currentOrdersByPrice.buy[buy])) buyResponse = exchange.createLimitBuyOrder(market, amount, buy).then(recordBuyOrder(market, amount, buy)).catch(handleFCoinOrderBuyError);
     if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginBuy[buy])) marginBuyResponse = exchange.createLimitBuyOrder(market, amount * marginMultiplier, buy, {'account_type': 'margin'}).then(recordBuyOrder(market, amount * marginMultiplier, buy, true)).catch(handleFCoinOrderBuyError);
-    if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
+  //  if (!(currentOrdersByPrice && currentOrdersByPrice.sell[sell])) sellResponse = exchange.createLimitSellOrder(market, amount, sell).then(recordSellOrder(market, amount, sell)).catch(handleFCoinOrderSellError);
     if (!noMargin && !(currentOrdersByPrice && currentOrdersByPrice.marginSell[sell])) marginSellResponse = exchange.createLimitSellOrder(market, amount * marginMultiplier, sell, {'account_type': 'margin'}).then(recordSellOrder(market, amount * marginMultiplier, sell, true)).catch(handleFCoinOrderSellError);
 
     if (prevBuyResponse) await prevBuyResponse;
@@ -596,41 +601,41 @@ async function manage () {
   }
 
   async function start () {
-    await startManage(fcoin, 'BTC/USDT', 5, 0.1, 0.02);
+    await startManage(fcoin, 'BTC/USDT', 2, 0.1, 0.05);
     await wait (pauseTime);
 
-    await startManage(fcoin, 'ETH/USDT', 5, 0.01, 0.5);
+    await startManage(fcoin, 'ETH/USDT', 2, 0.01, 0.5);
     await wait (pauseTime);
 
-    await startManage(fcoin, 'EOS/USDT', 4, 0.001, 15);
+    await startManage(fcoin, 'EOS/USDT', 2, 0.001, 15);
     await wait (pauseTime);
 
-    await startManage(fcoin, 'LTC/USDT', 4, 0.01, 1);
+    await startManage(fcoin, 'LTC/USDT', 2, 0.01, 1);
     await wait (pauseTime);
 
-    await startManage(fcoin, 'BCH/USDT', 5, 0.1, 0.25);
+    await startManage(fcoin, 'BCH/USDT', 2, 0.1, 0.75);
     await wait (pauseTime);
 
-    await startManage(fcoin, 'BCH/BTC', 4, 0.00001, 0.2);
+    await startManage(fcoin, 'BCH/BTC', 2, 0.00001, 0.2);
   }
 
   async function end () {
-    await manageMarketPercent('BTC/USDT', fcoin, 5, 0.1, 0.02);
+    await manageMarketPercent('BTC/USDT', fcoin, 2, 0.1, 0.05);
     await wait (pauseTime);
 
-    await manageMarketPercent('ETH/USDT', fcoin, 5, 0.01, 0.5);
+    await manageMarketPercent('ETH/USDT', fcoin, 2, 0.01, 0.5);
     await wait (pauseTime);
 
-    await manageMarketPercent('EOS/USDT', fcoin, 4, 0.001, 15);
+    await manageMarketPercent('EOS/USDT', fcoin, 2, 0.001, 15);
     await wait (pauseTime);
 
-    await manageMarketPercent('LTC/USDT', fcoin, 4, 0.01, 1);
+    await manageMarketPercent('LTC/USDT', fcoin, 2, 0.01, 1);
     await wait (pauseTime);
 
-    await manageMarketPercent('BCH/USDT', fcoin, 5, 0.1, 0.25);
+    await manageMarketPercent('BCH/USDT', fcoin, 2, 0.1, 0.75);
     await wait (pauseTime);
 
-    await manageMarketPercent('BCH/BTC', fcoin, 4, 0.00001, 0.2);
+    await manageMarketPercent('BCH/BTC', fcoin, 2, 0.00001, 0.2);
   }
 }
 

@@ -1,0 +1,38 @@
+<html>
+  <head>
+    <title>trade</title>
+    <script>
+      var ws = new WebSocket('ws://' + window.location.host + '/ws');
+
+
+      function sendCommand() {
+        console.log(arguments);
+//        ws.send('test', arguments);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(`command ${JSON.stringify(getFormData(document.forms.command))}`);
+        }
+        else console.log('ws not ready');
+      }
+
+      function getFormData (form) {
+        var ret = {};
+
+        for (var el of form.elements) {
+          ret[el.name] = el.value;
+        }
+
+        return ret;
+      }
+    </script>
+  </head>
+  <body>
+    <log></log>
+    <current-programs></current-programs>
+    <command>
+      <form name="command" onsubmit="sendCommand();return false">
+        <input name="command" type="text" placeholder=">" />
+        <submit></submit>
+      </form>
+    </command>
+  </body>
+</html
