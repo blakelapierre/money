@@ -1,0 +1,196 @@
+<html>
+  <head>
+    <title>trade</title>
+    <script>
+      var ws = new WebSocket('ws://' + window.location.host + '/ws');
+
+      var prices = {};
+      var els;
+
+      function grabEls() {
+        els = {
+          btcusdt: {
+            ask: document.getElementById('btcusdt-ask'),
+            bid: document.getElementById('btcusdt-bid'),
+            orders: {
+              asks: document.getElementById('btcusdt-orders-asks'),
+              bids: document.getElementById('btcusdt-orders-bids')
+            }
+          },
+          bchusdt: {
+            ask: document.getElementById('bchusdt-ask'),
+            bid: document.getElementById('bchusdt-bid'),
+            orders: {
+              asks: document.getElementById('bchusdt-orders-asks'),
+              bids: document.getElementById('bchusdt-orders-bids')
+            }
+          }
+        };
+      }
+
+      ws.addEventListener('message', function (event) {
+        try {
+          var data = JSON.parse(event.data);
+
+          console.log(data);
+
+          if (data[0].indexOf('ticker.') === 0) {
+            var tp = prices[data[0]] = prices[data[0]] || {};
+
+            tp.ask = data[1];
+            tp.bid = data[2];
+
+            var parts = data[0].split('.');
+            var market = parts[1];
+
+            var ask = els[market].ask.innerText;
+            var bid = els[market].bid.innerText;
+
+          
+
+            els[market].ask.innerText = tp.ask !== null ? tp.ask.toFixed(2) : undefined;
+            els[market].bid.innerText = tp.bid !== null ? tp.bid.toFixed(2) : undefined;
+          }
+
+          else if (data[0] === 'buy') {
+            var ticker = data[1],
+                bid = data[2],
+                amount = data[3],
+                id = data[4];
+
+            els[ticker].orders.bids.prepend(makeBuyEl(ticker, bid, amount, id));
+          }
+
+          else if (data[0] === 'sell') {
+            var ticker = data[1],
+                ask = data[2],
+                amount = data[3],
+                id = data[4];
+
+            els[ticker].orders.asks.prepend(makeSellEl(ticker, ask, amount, id));
+          }
+
+          else if (data[0] === 'closed') {
+            var ticker = data[1],
+                ids = data[2];
+
+            for (var id of ids) {
+              var el = document.getElementById(id);
+
+              if (el) el.remove();
+            }
+          }
+        }
+        catch (e) {
+          console.log('error parsing message', event.data, e);
+        }
+      });
+
+      function makeBuyEl (ticker, bid, amount, id) {
+        var el = document.createElement('buy');
+
+        el.id = id;
+
+        el.innerText = bid.toFixed(2) + ' ' + amount + ' (' + (bid * amount).toFixed(2) + ')';
+
+        return el;
+      }
+
+      function makeSellEl (ticker, ask, amount, id) {
+        var el = document.createElement('sell');
+
+        el.id = id;
+
+        el.innerText = ask.toFixed(2) + ' ' + amount + ' (' + (ask * amount).toFixed(2) + ')';
+
+        return el;
+      }
+
+      function sendCommand() {
+        console.log(arguments);
+//        ws.send('test', arguments);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(`command ${JSON.stringify(getFormData(document.forms.command))}`);
+        }
+        else console.log('ws not ready');
+      }
+
+      function getFormData (form) {
+        var ret = {};
+
+        for (var el of form.elements) {
+          ret[el.name] = el.value;
+        }
+
+        return ret;
+      }
+    </script>
+    <style>
+      btc-usdt { display: block; }
+      bch-usdt { display: block; }
+
+      buy {
+        display: block;
+        background-color: #0a0;
+        color: #fff;
+        font-weight: bold;
+      }
+
+      sell {
+        display: block;
+        background-color: #a00;
+        color: #fff;
+        font-weight: bold;
+      }
+
+      orders {
+        display: flex;
+      }
+
+      orders btc-usdt, orders bch-usdt {
+        display: flex;
+      }
+
+      markets {
+        display: flex;
+
+        text-align: center;
+      }
+
+    </style>
+  </head>
+  <body onload="grabEls()">
+    <log></log>
+    <current-programs></current-programs>
+    <command>
+      <form name="command" onsubmit="sendCommand();return false">
+        <input name="command" type="text" placeholder=">" />
+        <submit></submit>
+      </form>
+    </command>
+    <markets>
+      <btc-usdt>
+        <prices>
+          <ticker>BTC/USDT</ticker>
+          <ask id="btcusdt-ask"></ask>
+          <bid id="btcusdt-bid"></bid>
+        </prices>
+        <orders>
+         <asks id="btcusdt-orders-asks"></asks>
+         <bids id="btcusdt-orders-bids"></bids>
+        </orders>
+      </btc-usdt>
+      <bch-usdt>
+        <prices>
+          <ticker>BCH/USDT</ticker>
+          <ask id="bchusdt-ask"></ask>
+          <bid id="bchusdt-bid"></bid>
+        </prices>
+        <orders>
+         <asks id="bchusdt-orders-asks"></asks>
+         <bids id="bchusdt-orders-bids"></bids>
+        </orders>
+      </bch-usdt>
+    </markets>
+  </body>
+</html
