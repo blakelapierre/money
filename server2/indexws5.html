@@ -1,11 +1,12 @@
 <html>
   <head>
     <title>trade</title>
+    <script src="smoothie.js"></script>
     <script>
       var ws = new WebSocket('ws://' + window.location.host + '/ws');
 
-      var prices = {};
-      var els;
+      var prices = {}, salesCharts = {};
+      var els, charts;
       var volumes = {
         'btcusdt': {'actual': 0, 'market': undefined},
         'bchusdt': {'actual': 0, 'market': undefined},
@@ -38,26 +39,101 @@
 
       var startTime = new Date().getTime();
 
+      class SalesChart {
+        constructor (canvas) {
+          this.canvas = canvas;
+          this.context = canvas.getContext('2d');
+          this.max = -Infinity;
+          this.min = Infinity;
+          this.data = [];
+          this.insertIndex = 0;
+          this.maxWidth = 100;
+
+          this.context.imageSmoothingEnabled = false;
+        }
+
+        add (side, amount) {
+          var color = side === 'buy' ? '#00aa00' : '#aa0000';
+console.log('add', side, amount);
+          this.context.fillStyle = color;
+          this.canvas.width = Math.min(this.canvas.width + 1, this.maxWidth);
+
+          amount *= 100;
+          this.max = Math.max(this.max, amount);
+          this.min = Math.min(this.min, amount);
+          this.diff = this.max - this.min;
+          this.height = Math.min(this.diff + 1, 50);
+
+          this.data[this.insertIndex++] = [color, amount];
+          this.insertIndex = this.insertIndex % this.maxWidth;
+
+          this.canvas.height = this.height;
+          this.context.clearRect(0, 0, this.canvas.width - 1, this.canvas.height - 1);
+console.log(this.canvas.width - 1, (amount - this.min) / this.diff * this.height, this.min, amount, this.max, this.diff);
+          for (let i = 0; i < this.data.length; i++) {
+            this.context.fillStyle = this.data[i][0];
+            var d = this.data[i][1];
+            this.context.fillRect(i, this.height - (d - this.min) / (this.diff + 1) * this.height, 1, 1);
+          }
+        }
+      }
+
       function grabEls() {
         els = {
           balances: {
             totalQuoteValue: document.getElementById('total-quote-value'),
             btcusdt: {
+              chart: {
+                baseCanvas: document.getElementById('btc-base-chart'),
+                quoteCanvas: document.getElementById('btc-quote-chart'),
+                priceCanvas: document.getElementById('btc-price-chart')
+              },
+              percents: {
+                base: document.getElementById('btc-percents-base'),
+                quote: document.getElementById('btc-percents-quote')
+              },
               balance: document.getElementById('btc-balance'),
               usdtBalance: document.getElementById('btc-usdt-balance'),
               value: document.getElementById('btc-value')
             },
             ethusdt: {
+              chart: {
+                baseCanvas: document.getElementById('eth-base-chart'),
+                quoteCanvas: document.getElementById('eth-quote-chart'),
+                priceCanvas: document.getElementById('eth-price-chart')
+              },
+              percents: {
+                base: document.getElementById('eth-percents-base'),
+                quote: document.getElementById('eth-percents-quote')
+              },
               balance: document.getElementById('eth-balance'),
               usdtBalance: document.getElementById('eth-usdt-balance'),
               value: document.getElementById('eth-value')
             },
             bchusdt: {
+              chart: {
+                baseCanvas: document.getElementById('bch-base-chart'),
+                quoteCanvas: document.getElementById('bch-quote-chart'),
+                priceCanvas: document.getElementById('bch-price-chart')
+              },
+              percents: {
+                base: document.getElementById('bch-percents-base'),
+                quote: document.getElementById('bch-percents-quote')
+              },
               balance: document.getElementById('bch-balance'),
               usdtBalance: document.getElementById('bch-usdt-balance'),
               value: document.getElementById('bch-value')
             },
             ltcusdt: {
+              chart: {
+                baseCanvas: document.getElementById('ltc-base-chart'),
+                quoteCanvas: document.getElementById('ltc-quote-chart'),
+                priceCanvas: document.getElementById('ltc-price-chart')
+              },
+              percents: {
+                base: document.getElementById('ltc-percents-base'),
+                quote: document.getElementById('ltc-percents-quote')
+              },
               balance: document.getElementById('ltc-balance'),
               usdtBalance: document.getElementById('ltc-usdt-balance'),
               value: document.getElementById('ltc-value')
@@ -65,12 +141,16 @@
           },
           btcusdt: {
             lowBalance: document.getElementById('btcusdt-low-balance'),
-            
+            sales: document.getElementById('btcusdt-sales-chart'), 
             ask: document.getElementById('btcusdt-ask'),
             bid: document.getElementById('btcusdt-bid'),
             orders: {
               asks: document.getElementById('btcusdt-orders-asks'),
               bids: document.getElementById('btcusdt-orders-bids')
+            },
+            missed: {
+              asks: document.getElementById('btcusdt-missed-asks'),
+              bids: document.getElementById('btcusdt-missed-bids')
             },
             filled: document.getElementById('btcusdt-filled'),
             canceled: document.getElementById('btcusdt-canceled'),
@@ -79,12 +159,16 @@
           },
           bchusdt: {
             lowBalance: document.getElementById('bchusdt-low-balance'),
-
+            sales: document.getElementById('bchusdt-sales-chart'), 
             ask: document.getElementById('bchusdt-ask'),
             bid: document.getElementById('bchusdt-bid'),
             orders: {
               asks: document.getElementById('bchusdt-orders-asks'),
               bids: document.getElementById('bchusdt-orders-bids')
+            },
+            missed: {
+              asks: document.getElementById('bchusdt-missed-asks'),
+              bids: document.getElementById('bchusdt-missed-bids')
             },
             filled: document.getElementById('bchusdt-filled'),
             canceled: document.getElementById('bchusdt-canceled'),
@@ -93,12 +177,16 @@
           },
           ethusdt: {
             lowBalance: document.getElementById('ethusdt-low-balance'),
-
+            sales: document.getElementById('ethusdt-sales-chart'),
             ask: document.getElementById('ethusdt-ask'),
             bid: document.getElementById('ethusdt-bid'),
             orders: {
               asks: document.getElementById('ethusdt-orders-asks'),
               bids: document.getElementById('ethusdt-orders-bids')
+            },
+            missed: {
+              asks: document.getElementById('ethusdt-missed-asks'),
+              bids: document.getElementById('ethusdt-missed-bids')
             },
             filled: document.getElementById('ethusdt-filled'),
             canceled: document.getElementById('ethusdt-canceled'),
@@ -107,12 +195,16 @@
           },
           ltcusdt: {
             lowBalance: document.getElementById('ltcusdt-low-balance'),
-
+            sales: document.getElementById('ltcusdt-sales-chart'), 
             ask: document.getElementById('ltcusdt-ask'),
             bid: document.getElementById('ltcusdt-bid'),
             orders: {
               asks: document.getElementById('ltcusdt-orders-asks'),
               bids: document.getElementById('ltcusdt-orders-bids')
+            },
+            missed: {
+              asks: document.getElementById('ltcusdt-missed-asks'),
+              bids: document.getElementById('ltcusdt-missed-bids')
             },
             filled: document.getElementById('ltcusdt-filled'),
             canceled: document.getElementById('ltcusdt-canceled'),
@@ -120,6 +212,67 @@
             runningBalance: document.getElementById('ltcusdt-running-balance')
           }
         };
+      }
+
+      function initCharts() {
+        charts = {
+          'btcusdt': makeChart('btcusdt'),
+          'ethusdt': makeChart('ethusdt'),
+          'ltcusdt': makeChart('ltcusdt'),
+          'bchusdt': makeChart('bchusdt')
+        };
+       
+        for (let ticker in charts) {
+          var series = charts[ticker].series;
+          var baseSmoothie = charts[ticker].baseSmoothie;
+          var quoteSmoothie = charts[ticker].quoteSmoothie;
+          var priceSmoothie = charts[ticker].priceSmoothie;
+
+          baseSmoothie.addTimeSeries(series.baseAmount, {strokeStyle: '#aaaa00'});
+          baseSmoothie.addTimeSeries(series.totalValueInBase, {strokeStyle: '#ffff00'});
+          quoteSmoothie.addTimeSeries(series.quoteAmount, {strokeStyle: '#00aaaa'});
+          quoteSmoothie.addTimeSeries(series.totalValueInQuote, {strokeStyle: '#00ffff'});
+
+          priceSmoothie.addTimeSeries(series.ask, {strokeStyle: '#ff0000'});
+          priceSmoothie.addTimeSeries(series.bid, {strokeStyle: '#00ff00'});
+        }
+
+        for (let ticker in charts) {
+          salesCharts[ticker] = new SalesChart(els[ticker].sales);
+        }
+
+        return charts;
+        
+        function makeChart(ticker) {
+          return {
+            baseSmoothie: initChart(els.balances[ticker].chart.baseCanvas),
+            quoteSmoothie: initChart(els.balances[ticker].chart.quoteCanvas),
+            priceSmoothie: initChart(els.balances[ticker].chart.priceCanvas),
+            series: {
+              baseAmount: new TimeSeries(),
+              quoteAmount: new TimeSeries(),
+              totalValueInBase: new TimeSeries(),
+              totalValueInQuote: new TimeSeries(),
+              ask: new TimeSeries(),
+              bid: new TimeSeries()
+            }
+          };
+        }
+      }
+
+      function initChart (el) {
+        var smoothie = new SmoothieChart({
+          millisPerPixel: 1000, 
+          maxValueScale: 1.5,
+          minValueScale: 1.5,
+          grid: {
+            fillStyle: 'transparent',
+            millisPerLine: 15 * 1000
+          },
+          interpolation: 'step'
+        });
+        smoothie.streamTo(el);
+        return smoothie;
       }
 
       ws.addEventListener('message', function (event) {
@@ -141,10 +294,24 @@
             var ask = els[market].ask.innerText;
             var bid = els[market].bid.innerText;
 
-          
+            var now = new Date().getTime();
+
+            charts[market].series.ask.append(now, tp.ask);
+            charts[market].series.bid.append(now, tp.bid);
 
             els[market].ask.innerText = tp.ask != null ? tp.ask.toFixed(2) : undefined;
             els[market].bid.innerText = tp.bid != null ? tp.bid.toFixed(2) : undefined;
+          }
+
+          else if (data[0] === 'missedOrders') {
+            var ticker = data[1],
+                side = data[2],
+                missedOrders = data[3];
+
+             var count = 0;
+             for (let price in missedOrders) count += missedOrders[price];
+
+             els[ticker].missed[side].innerText = count + ' ' + JSON.stringify(missedOrders, undefined, 2);
           }
 
           else if (data[0] === 'balances') {
@@ -160,15 +327,35 @@
               var baseAmount = parseFloat(balance.available_base_currency_amount) + parseFloat(balance.frozen_base_currency_amount);
               var quoteAmount = parseFloat(balance.available_quote_currency_amount) + parseFloat(balance.frozen_quote_currency_amount);
 
+              var baseAmountAtMarketValue = (baseAmount * prices[ticker].bid);
               var baseValue = baseAmount + (quoteAmount / prices[ticker].ask);
-              var quoteValue = quoteAmount + (baseAmount * prices[ticker].bid);
+              var quoteValue = quoteAmount + baseAmountAtMarketValue;
 
               totalQuoteValue += quoteValue;
 
-              var basePercent = baseValue / (baseValue + quoteValue); // maybe should use different calc?
-              var quotePercent = quoteValue / (baseValue * quoteValue); // maybe should use different calc?
+              var now = new Date().getTime();
 
-              els.balances[ticker].balance.innerText = '{' + baseAmount.toFixed(8) + + ' ' + balance.base.toUpperCase() +  '} ' +  basePercent.toFixed(2) + ' : ' + quotePercent.toFixed(2);
+              charts[ticker].series.baseAmount.append(now, baseAmount);
+              charts[ticker].series.quoteAmount.append(now, quoteAmount);
+              charts[ticker].series.totalValueInBase.append(now, baseValue);
+              charts[ticker].series.totalValueInQuote.append(now, quoteValue);
+
+              var basePercent = baseAmountAtMarketValue / quoteValue; // maybe should use different calc?
+              var quotePercent = quoteAmount / quoteValue; // maybe should use different calc?
+
+              var basePercentClass = getPercentClass(basePercent);
+              var quotePercentClass = getPercentClass(quotePercent);
+
+              function getPercentClass (percent) {
+                return percent > 0.45 && percent < 0.55 ? 'good' : 'bad';
+              }
+
+
+              els.balances[ticker].balance.innerText = '{' + baseAmount.toFixed(8) + + ' ' + balance.base.toUpperCase() +  '}';
+              els.balances[ticker].percents.base.innerText = basePercent.toFixed(2);
+              els.balances[ticker].percents.quote.innerText = quotePercent.toFixed(2);
+              els.balances[ticker].percents.base.className = basePercentClass;
+              els.balances[ticker].percents.quote.className = quotePercentClass;
               els.balances[ticker].usdtBalance.innerText = '($' + quoteAmount.toFixed(2) + ')';
               els.balances[ticker].value.innerText = '[' + baseValue.toFixed(8) + ' '  + balance.base.toUpperCase() + ' ($' + quoteValue.toFixed(2) + ')]';
             }
@@ -266,18 +453,18 @@
               var el = document.getElementById(id);
 
               if (el) {
-                var fTokenPrice = 0.1387;
+                var fTokenPrice = 0.1194;
 
                 var estimatedDailyVolume = volumes[ticker].actual * dailyProportion;
                 var marketShare = prices[ticker].vol ? estimatedDailyVolume / prices[ticker].vol : 0;
                 var estimatedFToken = marketShare * mining[ticker].trading;
                 var estimatedDollars = estimatedFToken * fTokenPrice;
 
-                var estimatedSortingFToken = estimatedFToken * 3.2;
+                var estimatedSortingFToken = estimatedFToken * 3.666;
                 //var estimatedSortingFToken = marketShare * mining[ticker].sorting;
                 var estimatedSortingDollars = estimatedSortingFToken * fTokenPrice;
 
-                var estimatedLimitFToken = estimatedFToken * 0.2;
+                var estimatedLimitFToken = estimatedFToken * 0.23;
                 //var estimatedLimitFToken = marketShare * mining[ticker].limit;
                 var estimatedLimitDollars = estimatedLimitFToken * fTokenPrice;
 
@@ -320,6 +507,8 @@
                 runningBalances[ticker].dollars += el.tagName.toLowerCase() === 'buy' ? -dollars : dollars;
                 runningBalances[ticker].units += el.tagName.toLowerCase() === 'buy' ? amount : -amount;
 
+                salesCharts[ticker].add(el.tagName.toLowerCase(), dollars);
+
                 var unitsValue = runningBalances[ticker].units * (runningBalances[ticker].units < 0 ? prices[ticker].bid : prices[ticker].ask);
                 var amountUnits = runningBalances[ticker].dollars / (runningBalances[ticker].dollars < 0 ? prices[ticker].ask : prices[ticker].bid);
 
@@ -327,6 +516,7 @@
                 var amountUnitsDaily = (runningBalances[ticker].units + amountUnits) * dailyProportion;
 
                 var netDollars = unitsValueDaily + estimatedTotalDollars;
+                var netUnlockedDollars = estimatedTotalDollars * 0.2;
 
                 els[ticker].runningBalance.innerText = 
                     runningBalances[ticker].units.toFixed(2) 
@@ -339,7 +529,8 @@
                   + amountUnits).toFixed(8) + '}'
                   + '\n($' + unitsValueDaily.toFixed(2)
                   + ') {' + amountUnitsDaily.toFixed(8)
-                  + '}\n($' + netDollars.toFixed(2) + ')';
+                  + '}\n($' + netDollars.toFixed(2)
+                  + ') ($' + netUnlockedDollars.toFixed(2) + ')';
 
                 var d = undefined;
                 if (els[ticker].filled.firstChild) {
@@ -405,6 +596,13 @@
       }
     </script>
     <style>
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+      }
+
       btc-usdt { display: block; }
       bch-usdt { display: block; }
       eth-usdt { display: block; }
@@ -429,6 +627,24 @@
         from { background-color: #0a0; }
         to { background-color: #050; }
       }
+
+      balances {
+        display: table;
+      }
+
+      balances > * {
+        display: table-row;
+      }
+
+      balances btcusdt > *,
+      balances ethusdt > *,
+      balances ltcusdt > *,
+      balances bchusdt > * {
+        display: table-cell;
+      }
+
+      .good { background-color: #afa; }
+      .bad { background-color: #faa; }
 
       ask { background-color: #a00; }
 
@@ -464,12 +680,30 @@
         display: flex;
       }
 
+      prices ask,
+      prices bid {
+        display: block;
+        width: 100%;
+      }
+
+      #btcusdt-sales-chart,
+      #bchusdt-sales-chart,
+      #ethusdt-sales-chart,
+      #ltcusdt-sales-chart {
+        width: 25vw;
+        min-height: 2em;
+        max-height: 3em;
+
+        background-color: transparent;
+      }
+
       asks, bids {
         flex: 1 0 auto;
       }
 
       markets {
         display: flex;
+        width: 100%;
 
         text-align: center;
 
@@ -477,7 +711,7 @@
       }
 
 
-      markets>* { flex: 1 0 auto; }
+      markets>* { flex: 1 1 auto; }
 
       low-balance {
         display: none;
@@ -508,12 +742,24 @@
         opacity: 0.8;
       }
 
-      balances > * {
-        display: block;
+      charts {
+        height: 75px;
+        width: 500px;
+
+        position: relative;
+        background-color: #000;
+        border: solid 1px #fff;
+      }
+
+      charts canvas {
+        position: absolute;
+        display: inline-block;
+        height: 75px;
+        width: 500px;
       }
     </style>
   </head>
-  <body onload="grabEls()">
+  <body onload="grabEls(); initCharts()">
     <!--
     <log></log>
     <current-programs></current-programs>
@@ -529,28 +775,68 @@
         <pair>BTC/USDT</pair>
         <value id="btc-value"></value>
         <btc id="btc-balance"></btc>
+        <percents>
+          <basep id="btc-percents-base"></basep>
+          :
+          <quote id="btc-percents-quote"></quote>
+        </percents>
         <usdt id="btc-usdt-balance"></usdt>
+        <charts>
+          <canvas id="btc-base-chart" width="500" height="75"></canvas>
+          <canvas id="btc-quote-chart" width="500" height="75"></canvas>
+          <canvas id="btc-price-chart" width="500" height="75"></canvas>
+        </charts>
       </btcusdt>
       <ethusdt>
         <pair>ETH/USDT</pair>
         <value id="eth-value"></value>
         <btc id="eth-balance"></btc>
+        <percents>
+          <basep id="eth-percents-base"></basep>
+          :
+          <quote id="eth-percents-quote"></quote>
+        </percents>
         <usdt id="eth-usdt-balance"></usdt>
+        <charts>
+          <canvas id="eth-base-chart" width="500" height="75"></canvas>
+          <canvas id="eth-quote-chart" width="500" height="75"></canvas>
+          <canvas id="eth-price-chart" width="500" height="75"></canvas>
+        </charts>
       </ethusdt>
       <ltcusdt>
         <pair>LTC/USDT</pair>
         <value id="ltc-value"></value>
         <btc id="ltc-balance"></btc>
+        <percents>
+          <basep id="ltc-percents-base"></basep>
+          :
+          <quote id="ltc-percents-quote"></quote>
+        </percents>
         <usdt id="ltc-usdt-balance"></usdt>
+        <charts>
+          <canvas id="ltc-base-chart" width="500" height="75"></canvas>
+          <canvas id="ltc-quote-chart" width="500" height="75"></canvas>
+          <canvas id="ltc-price-chart" width="500" height="75"></canvas>
+        </charts>
       </ltcusdt>
       <bchusdt>
         <pair>BCH/USDT</pair>
         <value id="bch-value"></value>
         <btc id="bch-balance"></btc>
+        <percents>
+          <basep id="bch-percents-base"></basep>
+          :
+          <quote id="bch-percents-quote"></quote>
+        </percents>
         <usdt id="bch-usdt-balance"></usdt>
+        <charts>
+          <canvas id="bch-base-chart" width="500" height="75"></canvas>
+          <canvas id="bch-quote-chart" width="500" height="75"></canvas>
+          <canvas id="bch-price-chart" width="500" height="75"></canvas>
+        </charts>
       </bchusdt>
-      <total-quote-value id="total-quote-value"></total-quote-value>
     </balances>
+    <total-quote-value id="total-quote-value"></total-quote-value>
     <markets>
       <btc-usdt>
         <low-balance id="btcusdt-low-balance">Low Balance</low-balance>
@@ -558,6 +844,7 @@
         <running-balance id="btcusdt-running-balance"></running-balance>
         <prices>
           <ticker>BTC/USDT</ticker>
+          <canvas id="btcusdt-sales-chart" width="1" height="1"></canvas>
           <ask id="btcusdt-ask"></ask>
           <bid id="btcusdt-bid"></bid>
         </prices>
@@ -565,6 +852,10 @@
          <asks id="btcusdt-orders-asks"></asks>
          <bids id="btcusdt-orders-bids"></bids>
         </orders>
+        <missed-orders>
+          <asks id="btcusdt-missed-asks"></asks>
+          <bids id="btcusdt-missed-bids"></bids>
+        </missed-orders>
         <processed>
           <canceled id="btcusdt-canceled"></canceled>
           <filled id="btcusdt-filled"></filled>
@@ -576,6 +867,7 @@
         <running-balance id="bchusdt-running-balance"></running-balance>
         <prices>
           <ticker>BCH/USDT</ticker>
+          <canvas id="bchusdt-sales-chart" width="1" height="1"></canvas>
           <ask id="bchusdt-ask"></ask>
           <bid id="bchusdt-bid"></bid>
         </prices>
@@ -583,6 +875,10 @@
          <asks id="bchusdt-orders-asks"></asks>
          <bids id="bchusdt-orders-bids"></bids>
         </orders>
+        <missed-orders>
+          <asks id="bchusdt-missed-asks"></asks>
+          <bids id="bchusdt-missed-bids"></bids>
+        </missed-orders>
         <processed>
           <canceled id="bchusdt-canceled"></canceled>
           <filled id="bchusdt-filled"></filled>
@@ -594,6 +890,7 @@
         <running-balance id="ethusdt-running-balance"></running-balance>
         <prices>
           <ticker>ETH/USDT</ticker>
+          <canvas id="ethusdt-sales-chart" width="1" height="1"></canvas>
           <ask id="ethusdt-ask"></ask>
           <bid id="ethusdt-bid"></bid>
         </prices>
@@ -601,6 +898,10 @@
          <asks id="ethusdt-orders-asks"></asks>
          <bids id="ethusdt-orders-bids"></bids>
         </orders>
+        <missed-orders>
+          <asks id="ethusdt-missed-asks"></asks>
+          <bids id="ethusdt-missed-bids"></bids>
+        </missed-orders>
         <processed>
           <canceled id="ethusdt-canceled"></canceled>
           <filled id="ethusdt-filled"></filled>
@@ -612,6 +913,7 @@
         <running-balance id="ltcusdt-running-balance"></running-balance>
         <prices>
           <ticker>LTC/USDT</ticker>
+          <canvas id="ltcusdt-sales-chart" width="1" height="1"></canvas>
           <ask id="ltcusdt-ask"></ask>
           <bid id="ltcusdt-bid"></bid>
         </prices>
@@ -619,6 +921,10 @@
          <asks id="ltcusdt-orders-asks"></asks>
          <bids id="ltcusdt-orders-bids"></bids>
         </orders>
+        <missed-orders>
+          <asks id="ltcusdt-missed-asks"></asks>
+          <bids id="ltcusdt-missed-bids"></bids>
+        </missed-orders>
         <processed>
           <canceled id="ltcusdt-canceled"></canceled>
           <filled id="ltcusdt-filled"></filled>
